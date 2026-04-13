@@ -18,11 +18,23 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setUsuario(user);
       if (user && user.email) {
-        const docSnap = await getDoc(doc(db, "asociaciones/san_fabian/usuarios_permisos", user.email));
-        if (docSnap.exists()) setRol(docSnap.data().rol);
+        setUsuario(user);
+        // CORRECCIÓN CLAVE: Limpiamos el email para que coincida exacto con Firebase
+        const emailLimpio = user.email.toLowerCase().trim();
+        const docRef = doc(db, "asociaciones/san_fabian/usuarios_permisos", emailLimpio);
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists()) {
+          const datos = docSnap.data();
+          console.log("✅ Rol detectado en BD:", datos.rol); // Puedes ver esto presionando F12
+          setRol(datos.rol);
+        } else {
+          console.warn("⚠️ Usuario logueado pero sin documento de permisos en Firestore");
+          setRol(null);
+        }
       } else {
+        setUsuario(null);
         setRol(null);
       }
       setCargando(false);
@@ -35,15 +47,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="es">
       <head>
-        {/* Configuración para PWA e Instalación en Celulares */}
         <link rel="manifest" href="/manifest.json" />
         <meta name="theme-color" content="#1e3a8a" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="Futbian Pro" />
         <link rel="apple-touch-icon" href="/icon-192.png" />
-        
-        {/* Viewport para evitar zoom accidental en la cancha */}
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
       </head>
       <body className={`${inter.className} min-h-screen flex flex-col bg-slate-50`}>
@@ -67,6 +76,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                       📝 Mesa Turno
                     </Link>
 
+                    {/* Si el rol es admin, mostramos los módulos de administración */}
                     {rol === 'admin' && (
                        <>
                          <Link href="/clubes" className="bg-blue-700 hover:bg-blue-600 px-3 py-2 rounded-md text-sm font-bold transition ml-4">
@@ -122,7 +132,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           )}
         </main>
 
-        {/* FOOTER OFICIAL CON FIRMA */}
         <footer className="bg-white border-t border-slate-200 py-8 mt-12">
           <div className="max-w-7xl mx-auto px-4 text-center">
             <p className="text-slate-400 text-xs font-medium uppercase tracking-widest mb-2">Plataforma Oficial de Gestión Deportiva</p>
