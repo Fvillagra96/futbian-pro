@@ -1,0 +1,21 @@
+{
+  "name": "Futbian Pro V2",
+  "short_name": "Futbian",
+  "description": "Gestión oficial Asociación San Fabián",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1e3a8a",
+  "theme_color": "#1e3a8a",
+  "icons": [
+    {
+      "src": "/icon-192.jpeg",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x192",
+      "type": "image/png"
+    }
+  ]
+}
