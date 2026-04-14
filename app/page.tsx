@@ -201,9 +201,9 @@ export default function HomeDashboard() {
               <div className="w-16 h-16 md:w-32 md:h-32 bg-white/10 rounded-full flex items-center justify-center text-3xl md:text-4xl shadow-lg shrink-0">⚽</div>
             )}
             <div>
-              <h2 className="text-blue-300 font-black uppercase tracking-[0.2em] text-[9px] md:text-xs mb-1">Asociación Oficial</h2>
+              <h2 className="text-blue-300 font-black uppercase tracking-[0.2em] text-[9px] md:text-xs mb-1">ASOCIACIÓN DE FÚTBOL SAN FABIÁN</h2>
               <h1 className="text-xl md:text-5xl font-black tracking-tighter italic leading-tight">
-                {infoAsociacion?.nombre || "FUTBIAN.PRO"}
+                {infoAsociacion?.nombre || "MINAS ÑUBLE 2026"}
               </h1>
               <div className="flex flex-wrap gap-2 mt-2 md:mt-4">
                 {infoAsociacion?.instagram && (
