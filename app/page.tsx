@@ -192,7 +192,7 @@ export default function HomeDashboard() {
             )}
 
             <div>
-              <h2 className="text-blue-300 font-black uppercase tracking-[0.2em] text-[10px] md:text-xs mb-1 md:mb-2">Asociación Oficial</h2>
+              <h2 className="text-blue-300 font-black uppercase tracking-[0.2em] text-[10px] md:text-xs mb-1 md:mb-2">Asociación de Fútbol San Fabián Oficial</h2>
               <h1 className="text-2xl md:text-5xl font-black tracking-tighter italic">
                 {infoAsociacion?.nombre || "FUTBIAN.PRO"}
               </h1>
