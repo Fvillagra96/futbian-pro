@@ -229,7 +229,7 @@ export default function HomeDashboard() {
           <button 
             key={v}
             onClick={() => setVistaActiva(v as any)}
-            className={`shrink-0 px-4 md:px-6 py-2.5 md:py-3 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all ${vistaActiva === v ? "bg-[#1e3a8a] text-white shadow-xl scale-105" : "bg-white text-slate-400 border border-slate-200"}`}
+            className={`shrink-0 px-4 md:px-6 py-2.5 md:py-3 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all ${vistaActiva === v ? "bg-[#93af15] text-white shadow-xl scale-105" : "bg-white text-slate-400 border border-slate-200"}`}
           >
             {v === 'general' ? '🏆 General' : v === 'series' ? '📊 Por Series' : '⚽ Goleadores'}
           </button>
