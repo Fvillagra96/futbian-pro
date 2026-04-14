@@ -60,13 +60,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={`${inter.className} min-h-screen flex flex-col bg-slate-50`}>
         
         {/* NAV BAR PROFESIONAL Y RESPONSIVO */}
-        <nav className="bg-[#1e3a8a] text-white shadow-lg sticky top-0 z-50">
+        <nav className="bg-[#93af15] text-white shadow-lg sticky top-0 z-50">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex items-center justify-between h-16">
               
               {/* LOGO */}
               <Link href="/" className="font-black text-xl tracking-tighter flex items-center gap-2">
-                <span className="bg-white text-[#1e3a8a] px-2 py-0.5 rounded">F</span> FUTBIAN.PRO
+                <span className="bg-white text-[#93af15] px-2 py-0.5 rounded">F</span> FUTBIAN.PRO
               </Link>
               
               {/* MENÚ DE ESCRITORIO (Se oculta en móviles) */}
@@ -162,7 +162,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="max-w-7xl mx-auto px-4 text-center">
             <p className="text-slate-400 text-xs font-medium uppercase tracking-widest mb-2">Plataforma Oficial de Gestión Deportiva</p>
             <div className="h-px w-12 bg-slate-200 mx-auto mb-4"></div>
-            <p className="text-slate-700 text-sm font-bold italic"># página creada por Fabián Villagra #</p>
+            <p className="text-slate-700 text-sm font-bold italic"> página creada por Fabián Villagra  </p>
             <p className="text-slate-400 text-[10px] mt-4">© {new Date().getFullYear()} Asociación de Fútbol San Fabián.</p>
           </div>
         </footer>
