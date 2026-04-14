@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect } from "react";
 import { db, auth } from "@/lib/firebase";
-import { collection, onSnapshot, query, orderBy, doc, updateDoc, arrayUnion, getDoc } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, doc, updateDoc, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 
 // --- Función para formatear RUT Chileno ---
@@ -20,7 +20,13 @@ const formatearRut = (valor: string) => {
 
 interface Jugador { id: string; nombre: string; rut: string; club: string; serie: string; }
 interface Evento { id: string; tipo: string; jugador: string; rut: string; equipo: string; minuto: string; }
-interface Partido { id: string; fechaNumero: number; local: string; visita: string; serie: string; golesLocal: number; golesVisita: number; estado: string; eventos?: Evento[]; }
+interface JugadorNomina { rut: string; nombre: string; equipo: string; }
+interface Partido { 
+  id: string; fechaNumero: number; local: string; visita: string; serie: string; 
+  golesLocal: number; golesVisita: number; estado: string; 
+  eventos?: Evento[]; 
+  nomina?: JugadorNomina[]; 
+}
 
 export default function PaginaActas() {
   const [rolUsuario, setRolUsuario] = useState<string | null>(null);
@@ -33,6 +39,9 @@ export default function PaginaActas() {
   const [idInput, setIdInput] = useState<string>("");
   const [jugadorEncontrado, setJugadorEncontrado] = useState<Jugador | null>(null);
   const [errorBusqueda, setErrorBusqueda] = useState<string>("");
+  
+  // Pestaña activa en el panel derecho (Eventos o Nómina)
+  const [pestanaDerecha, setPestanaDerecha] = useState<"eventos" | "nomina">("eventos");
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
@@ -81,6 +90,33 @@ export default function PaginaActas() {
     else { setIdInput(valor.toUpperCase()); }
   };
 
+  // --- MOTOR DE REGISTRO ---
+  
+  const agregarANomina = async () => {
+    if (!partidoActivo || !jugadorEncontrado) return;
+    
+    // Evitar duplicados
+    const yaRegistrado = partidoActivo.nomina?.some(j => j.rut === jugadorEncontrado.rut);
+    if (yaRegistrado) {
+      alert("El jugador ya está en la nómina del partido.");
+      return;
+    }
+
+    const nuevoJugadorNomina: JugadorNomina = {
+      rut: jugadorEncontrado.rut,
+      nombre: jugadorEncontrado.nombre,
+      equipo: jugadorEncontrado.club
+    };
+
+    try {
+      await updateDoc(doc(db, "asociaciones/san_fabian/partidos", partidoActivo.id), {
+        nomina: arrayUnion(nuevoJugadorNomina),
+        estado: "En Juego"
+      });
+      setPestanaDerecha("nomina"); // Cambiamos la vista a la nómina para confirmar
+    } catch (error) { console.error(error); }
+  };
+
   const registrarEvento = async (tipoEvento: string) => {
     if (!partidoActivo || !jugadorEncontrado) return;
     const nuevoEvento: Evento = {
@@ -99,20 +135,63 @@ export default function PaginaActas() {
         if (jugadorEncontrado.club === partidoActivo.local) golesL += 1;
         else golesV += 1;
       }
+      
+      // Si hace un evento, lo agregamos a la nómina automáticamente por si se les olvidó
+      const jugadorParaNomina: JugadorNomina = { rut: jugadorEncontrado.rut, nombre: jugadorEncontrado.nombre, equipo: jugadorEncontrado.club };
+      const yaRegistrado = partidoActivo.nomina?.some(j => j.rut === jugadorEncontrado.rut);
+
       await updateDoc(partidoRef, {
         eventos: arrayUnion(nuevoEvento),
+        ...( !yaRegistrado && { nomina: arrayUnion(jugadorParaNomina) } ), // Solo lo agrega a la nómina si no estaba
         golesLocal: golesL,
         golesVisita: golesV,
         estado: "En Juego"
       });
       setJugadorEncontrado(null);
       setIdInput("");
+      setPestanaDerecha("eventos");
     } catch (error) { console.error(error); }
+  };
+
+  // --- MOTOR DE EDICIÓN / ELIMINACIÓN ---
+
+  const eliminarEvento = async (eventoAEliminar: Evento) => {
+    if (!partidoActivo) return;
+    if (!confirm(`¿Eliminar este evento de ${eventoAEliminar.jugador}?`)) return;
+
+    try {
+      const partidoRef = doc(db, "asociaciones/san_fabian/partidos", partidoActivo.id);
+      let golesL = partidoActivo.golesLocal || 0;
+      let golesV = partidoActivo.golesVisita || 0;
+
+      // Si estamos borrando un gol, debemos descontarlo del marcador
+      if (eventoAEliminar.tipo === '⚽ Gol') {
+        if (eventoAEliminar.equipo === partidoActivo.local) golesL = Math.max(0, golesL - 1);
+        else golesV = Math.max(0, golesV - 1);
+      }
+
+      await updateDoc(partidoRef, {
+        eventos: arrayRemove(eventoAEliminar),
+        golesLocal: golesL,
+        golesVisita: golesV
+      });
+    } catch (error) { console.error("Error al eliminar evento", error); }
+  };
+
+  const eliminarDeNomina = async (jugadorAEliminar: JugadorNomina) => {
+    if (!partidoActivo) return;
+    if (!confirm(`¿Quitar a ${jugadorAEliminar.nombre} de la nómina oficial?`)) return;
+
+    try {
+      await updateDoc(doc(db, "asociaciones/san_fabian/partidos", partidoActivo.id), {
+        nomina: arrayRemove(jugadorAEliminar)
+      });
+    } catch (error) { console.error("Error al eliminar de nómina", error); }
   };
 
   const finalizarPartido = async () => {
     if (!partidoActivo) return;
-    if (confirm("¿Cerrar acta definitiva?")) {
+    if (confirm("¿Cerrar acta definitiva? Ya no se podrán agregar más eventos.")) {
       await updateDoc(doc(db, "asociaciones/san_fabian/partidos", partidoActivo.id), { estado: "Finalizado" });
       setPartidoSeleccionadoId("");
     }
@@ -135,29 +214,20 @@ export default function PaginaActas() {
         </div>
       </header>
 
-      {/* MARCADOR GIGANTE (Siempre visible primero en móvil) */}
+      {/* MARCADOR GIGANTE */}
       {partidoActivo && (
         <div className="bg-slate-900 rounded-3xl p-4 md:p-8 shadow-2xl text-white border-2 md:border-4 border-slate-800 relative overflow-hidden">
           <div className="flex items-center justify-between gap-2 relative z-10">
-            {/* Local */}
             <div className="flex-1 text-center min-w-0">
-              <p className="text-[10px] md:text-xl font-black uppercase italic break-words leading-tight">
-                {partidoActivo.local}
-              </p>
+              <p className="text-[10px] md:text-xl font-black uppercase italic break-words leading-tight">{partidoActivo.local}</p>
             </div>
-            
-            {/* Goles */}
             <div className="flex items-center gap-2 md:gap-4 shrink-0 bg-black/20 px-3 py-2 rounded-2xl">
               <span className="text-4xl md:text-7xl font-black text-emerald-400 tabular-nums">{partidoActivo.golesLocal || 0}</span>
               <span className="text-xl md:text-4xl text-slate-700 font-light">-</span>
               <span className="text-4xl md:text-7xl font-black text-emerald-400 tabular-nums">{partidoActivo.golesVisita || 0}</span>
             </div>
-
-            {/* Visita */}
             <div className="flex-1 text-center min-w-0">
-              <p className="text-[10px] md:text-xl font-black uppercase italic break-words leading-tight">
-                {partidoActivo.visita}
-              </p>
+              <p className="text-[10px] md:text-xl font-black uppercase italic break-words leading-tight">{partidoActivo.visita}</p>
             </div>
           </div>
           <div className="absolute top-0 left-0 w-full h-full opacity-5 pointer-events-none flex justify-center items-center text-[150px]">⚽</div>
@@ -166,7 +236,7 @@ export default function PaginaActas() {
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6">
         
-        {/* PANEL IZQUIERDO: CONTROLES */}
+        {/* PANEL IZQUIERDO: BÚSQUEDA Y REGISTRO */}
         <div className="lg:col-span-5 space-y-4 md:space-y-6 order-2 lg:order-1">
           
           <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200">
@@ -185,7 +255,7 @@ export default function PaginaActas() {
 
           {partidoActivo && (
             <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200">
-              <label className="block text-[10px] md:text-xs font-bold text-slate-500 uppercase mb-3">2. Registrar para:</label>
+              <label className="block text-[10px] md:text-xs font-bold text-slate-500 uppercase mb-3">2. Buscar Jugador para:</label>
               
               <div className="grid grid-cols-2 gap-2 md:gap-3 mb-6">
                 <button 
@@ -221,16 +291,26 @@ export default function PaginaActas() {
                   {errorBusqueda && <p className="text-[10px] md:text-xs text-red-600 font-bold bg-red-50 p-3 rounded-lg border border-red-100 italic">⚠️ {errorBusqueda}</p>}
 
                   {jugadorEncontrado && (
-                    <div className="bg-emerald-50 p-4 rounded-xl border-2 border-emerald-500 space-y-4 animate-in zoom-in-95 duration-200">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-emerald-600 text-white flex items-center justify-center font-black text-lg md:text-xl">
-                          {jugadorEncontrado.nombre.charAt(0)}
-                        </div>
+                    <div className="bg-slate-50 p-4 rounded-xl border-2 border-emerald-500 space-y-4 animate-in zoom-in-95 duration-200 shadow-lg relative overflow-hidden">
+                      <div className="absolute top-0 left-0 w-2 h-full bg-emerald-500"></div>
+                      <div className="flex items-center gap-3 pl-2">
                         <div className="min-w-0 flex-1">
                           <p className="font-black text-slate-800 text-sm md:text-base leading-tight uppercase truncate">{jugadorEncontrado.nombre}</p>
-                          <p className="text-[10px] md:text-xs font-bold text-emerald-700">{jugadorEncontrado.rut}</p>
+                          <p className="text-[10px] md:text-xs font-bold text-slate-500">{jugadorEncontrado.rut}</p>
                         </div>
                       </div>
+                      
+                      {/* BOTÓN NUEVO: Asignar a Nómina */}
+                      <button onClick={agregarANomina} className="w-full bg-[#1e3a8a] hover:bg-blue-800 text-white py-3 rounded-xl font-black text-xs transition shadow-sm flex justify-center items-center gap-2">
+                        📋 MARCAR PRESENTE EN NÓMINA
+                      </button>
+
+                      <div className="flex items-center gap-2">
+                        <div className="h-px bg-slate-200 flex-1"></div>
+                        <span className="text-[10px] font-bold text-slate-400">O REGISTRAR EVENTO DIRECTO</span>
+                        <div className="h-px bg-slate-200 flex-1"></div>
+                      </div>
+
                       <div className="grid grid-cols-3 gap-2">
                         <button onClick={() => registrarEvento('⚽ Gol')} className="bg-white border-2 border-slate-200 py-3 rounded-xl font-black text-[10px] md:text-xs hover:border-emerald-500 transition shadow-sm">⚽ GOL</button>
                         <button onClick={() => registrarEvento('🟨 Amarilla')} className="bg-white border-2 border-slate-200 py-3 rounded-xl font-black text-[10px] md:text-xs hover:border-yellow-500 transition shadow-sm">🟨 TA</button>
@@ -250,30 +330,89 @@ export default function PaginaActas() {
           )}
         </div>
 
-        {/* PANEL DERECHO: CRONOLOGÍA */}
+        {/* PANEL DERECHO: EDICIÓN Y VISUALIZACIÓN */}
         <div className="lg:col-span-7 order-3 lg:order-2">
            {partidoActivo ? (
-             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                <div className="p-4 bg-slate-50 border-b border-slate-200 font-bold text-slate-700 text-sm">Sucesos del Partido</div>
-                <div className="p-2 md:p-4 space-y-2 max-h-[500px] overflow-y-auto">
-                  {partidoActivo.eventos?.length ? [...partidoActivo.eventos].reverse().map((ev, i) => (
-                    <div key={i} className="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-xl shadow-sm">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <span className="text-xl md:text-2xl shrink-0">{ev.tipo.includes('Gol') ? '⚽' : ev.tipo.includes('Amarilla') ? '🟨' : '🟥'}</span>
-                        <div className="min-w-0">
-                          <p className="font-bold text-slate-800 text-[10px] md:text-xs uppercase truncate">{ev.jugador}</p>
-                          <p className="text-[8px] md:text-[10px] font-bold text-blue-600 truncate">{ev.equipo} • {ev.rut}</p>
+             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-full min-h-[400px]">
+                
+                {/* PESTAÑAS (TABS) */}
+                <div className="flex bg-slate-100 p-1 border-b border-slate-200">
+                  <button 
+                    onClick={() => setPestanaDerecha("eventos")} 
+                    className={`flex-1 py-3 text-xs md:text-sm font-bold rounded-xl transition ${pestanaDerecha === "eventos" ? "bg-white text-[#1e3a8a] shadow-sm" : "text-slate-500 hover:bg-slate-200"}`}
+                  >
+                    ⏱️ Sucesos
+                  </button>
+                  <button 
+                    onClick={() => setPestanaDerecha("nomina")} 
+                    className={`flex-1 py-3 text-xs md:text-sm font-bold rounded-xl transition ${pestanaDerecha === "nomina" ? "bg-white text-[#1e3a8a] shadow-sm" : "text-slate-500 hover:bg-slate-200"}`}
+                  >
+                    📋 Nómina Oficial
+                  </button>
+                </div>
+
+                <div className="p-2 md:p-4 flex-1 overflow-y-auto bg-slate-50/50">
+                  
+                  {/* VISTA: EVENTOS */}
+                  {pestanaDerecha === "eventos" && (
+                    <div className="space-y-2">
+                      {partidoActivo.eventos?.length ? [...partidoActivo.eventos].reverse().map((ev, i) => (
+                        <div key={ev.id || i} className="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-xl shadow-sm hover:border-blue-200 transition group">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <span className="text-xl md:text-2xl shrink-0">{ev.tipo.includes('Gol') ? '⚽' : ev.tipo.includes('Amarilla') ? '🟨' : '🟥'}</span>
+                            <div className="min-w-0">
+                              <p className="font-bold text-slate-800 text-[10px] md:text-xs uppercase truncate">{ev.jugador}</p>
+                              <p className="text-[8px] md:text-[10px] font-bold text-blue-600 truncate">{ev.equipo} • {ev.minuto}</p>
+                            </div>
+                          </div>
+                          {/* BOTÓN ELIMINAR EVENTO */}
+                          <button onClick={() => eliminarEvento(ev)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition" title="Eliminar este evento">
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                          </button>
+                        </div>
+                      )) : <p className="text-center py-10 text-slate-400 text-sm font-medium">No hay sucesos registrados.</p>}
+                    </div>
+                  )}
+
+                  {/* VISTA: NÓMINA */}
+                  {pestanaDerecha === "nomina" && (
+                    <div className="space-y-6">
+                      {/* Nómina Local */}
+                      <div>
+                        <h4 className="text-[10px] md:text-xs font-black text-slate-400 uppercase tracking-wider mb-2 border-b pb-1">Local: {partidoActivo.local}</h4>
+                        <div className="space-y-1">
+                          {partidoActivo.nomina?.filter(j => j.equipo === partidoActivo.local).map((jugador, i) => (
+                            <div key={i} className="flex items-center justify-between p-2 bg-white rounded-lg border border-slate-100">
+                              <span className="text-[10px] md:text-xs font-bold text-slate-700">{jugador.nombre}</span>
+                              <button onClick={() => eliminarDeNomina(jugador)} className="text-slate-300 hover:text-red-500 transition px-2">✖</button>
+                            </div>
+                          ))}
+                          {(!partidoActivo.nomina || partidoActivo.nomina.filter(j => j.equipo === partidoActivo.local).length === 0) && <p className="text-[10px] italic text-slate-400">Sin jugadores locales.</p>}
                         </div>
                       </div>
-                      <span className="text-[9px] font-mono text-slate-400 bg-slate-50 px-2 py-1 rounded shrink-0">{ev.minuto}</span>
+                      
+                      {/* Nómina Visita */}
+                      <div>
+                        <h4 className="text-[10px] md:text-xs font-black text-slate-400 uppercase tracking-wider mb-2 border-b pb-1">Visita: {partidoActivo.visita}</h4>
+                        <div className="space-y-1">
+                          {partidoActivo.nomina?.filter(j => j.equipo === partidoActivo.visita).map((jugador, i) => (
+                            <div key={i} className="flex items-center justify-between p-2 bg-white rounded-lg border border-slate-100">
+                              <span className="text-[10px] md:text-xs font-bold text-slate-700">{jugador.nombre}</span>
+                              <button onClick={() => eliminarDeNomina(jugador)} className="text-slate-300 hover:text-red-500 transition px-2">✖</button>
+                            </div>
+                          ))}
+                          {(!partidoActivo.nomina || partidoActivo.nomina.filter(j => j.equipo === partidoActivo.visita).length === 0) && <p className="text-[10px] italic text-slate-400">Sin jugadores visita.</p>}
+                        </div>
+                      </div>
                     </div>
-                  )) : <p className="text-center py-10 text-slate-400 text-sm">Sin incidencias registradas.</p>}
+                  )}
+
                 </div>
              </div>
            ) : (
              <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl min-h-[300px] flex flex-col items-center justify-center p-10 text-slate-400 order-1">
                 <span className="text-5xl mb-4">📋</span>
-                <p className="font-bold text-sm text-center">Selecciona un partido para comenzar el acta.</p>
+                <p className="font-bold text-sm text-center">Selecciona un partido para comenzar.</p>
              </div>
            )}
         </div>
