@@ -75,11 +75,13 @@ export default function PaginaActas() {
     setJugadorEncontrado(null);
     if (!partidoActivo || !equipoSeleccionado) return;
     const clubABuscar = equipoSeleccionado === "local" ? partidoActivo.local : partidoActivo.visita;
+    
+    // CORRECCIÓN AQUÍ: Solo busca por RUT y Club, sin importar la serie del jugador
     const encontrado = jugadores.find(j => 
       j.rut.toUpperCase() === idInput.toUpperCase() && 
-      j.serie === partidoActivo.serie &&
       j.club === clubABuscar
     );
+    
     if (encontrado) { setJugadorEncontrado(encontrado); } 
     else { setErrorBusqueda(`ID no encontrado en ${clubABuscar}.`); }
   };
@@ -296,11 +298,12 @@ export default function PaginaActas() {
                       <div className="flex items-center gap-3 pl-2">
                         <div className="min-w-0 flex-1">
                           <p className="font-black text-slate-800 text-sm md:text-base leading-tight uppercase truncate">{jugadorEncontrado.nombre}</p>
-                          <p className="text-[10px] md:text-xs font-bold text-slate-500">{jugadorEncontrado.rut}</p>
+                          <p className="text-[10px] md:text-xs font-bold text-slate-500">
+                            {jugadorEncontrado.rut} • <span className="text-[#1e3a8a]">Serie {jugadorEncontrado.serie}</span>
+                          </p>
                         </div>
                       </div>
                       
-                      {/* BOTÓN NUEVO: Asignar a Nómina */}
                       <button onClick={agregarANomina} className="w-full bg-[#1e3a8a] hover:bg-blue-800 text-white py-3 rounded-xl font-black text-xs transition shadow-sm flex justify-center items-center gap-2">
                         📋 MARCAR PRESENTE EN NÓMINA
                       </button>
