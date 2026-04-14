@@ -75,6 +75,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   <Link href="/" className="hover:bg-blue-800 px-3 py-2 rounded-md text-sm font-bold transition">Home</Link>
                   <Link href="/jugadores" className="hover:bg-blue-800 px-3 py-2 rounded-md text-sm font-bold transition">Jugadores</Link>
                   <Link href="/gestion/actas" className="bg-emerald-600 hover:bg-emerald-500 px-3 py-2 rounded-md text-sm font-bold transition shadow-sm ml-2">📝 Mesa Turno</Link>
+                  <Link href="/liguilla" className="hover:bg-blue-800 px-3 py-2 rounded-md text-sm font-bold transition">
+  🏆 Liguilla
+</Link>
                   {rol === 'admin' && (
                      <>
                        <Link href="/clubes" className="bg-blue-700 hover:bg-blue-600 px-3 py-2 rounded-md text-sm font-bold transition ml-4">🛡️ Admin Clubes</Link>
