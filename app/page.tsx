@@ -208,12 +208,12 @@ export default function HomeDashboard() {
               <div className="flex flex-wrap gap-2 mt-2 md:mt-4">
                 {infoAsociacion?.instagram && (
                   <a href={infoAsociacion.instagram} target="_blank" className="bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-[9px] md:text-xs font-bold backdrop-blur-sm border border-white/10">
-                    <span className="text-xs md:text-lg">📸</span> Instagram
+                    <span className="text-xs md:text-lg">🅾</span> Instagram
                   </a>
                 )}
                 {infoAsociacion?.facebook && (
                   <a href={infoAsociacion.facebook} target="_blank" className="bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-[9px] md:text-xs font-bold backdrop-blur-sm border border-white/10">
-                    <span className="text-xs md:text-lg">📘</span> Facebook
+                    <span className="text-xs md:text-lg">ⓕ</span> Facebook
                   </a>
                 )}
               </div>
