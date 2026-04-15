@@ -26,6 +26,7 @@ interface Partido {
   golesLocal: number; golesVisita: number; estado: string; 
   eventos?: Evento[]; 
   nomina?: JugadorNomina[]; 
+  respaldoActa?: string; 
 }
 
 export default function PaginaActas() {
@@ -40,7 +41,6 @@ export default function PaginaActas() {
   const [jugadorEncontrado, setJugadorEncontrado] = useState<Jugador | null>(null);
   const [errorBusqueda, setErrorBusqueda] = useState<string>("");
   
-  // Pestaña activa en el panel derecho (Eventos o Nómina)
   const [pestanaDerecha, setPestanaDerecha] = useState<"eventos" | "nomina">("eventos");
 
   useEffect(() => {
@@ -76,7 +76,6 @@ export default function PaginaActas() {
     if (!partidoActivo || !equipoSeleccionado) return;
     const clubABuscar = equipoSeleccionado === "local" ? partidoActivo.local : partidoActivo.visita;
     
-    // CORRECCIÓN AQUÍ: Solo busca por RUT y Club, sin importar la serie del jugador
     const encontrado = jugadores.find(j => 
       j.rut.toUpperCase() === idInput.toUpperCase() && 
       j.club === clubABuscar
@@ -93,11 +92,9 @@ export default function PaginaActas() {
   };
 
   // --- MOTOR DE REGISTRO ---
-  
   const agregarANomina = async () => {
     if (!partidoActivo || !jugadorEncontrado) return;
     
-    // Evitar duplicados
     const yaRegistrado = partidoActivo.nomina?.some(j => j.rut === jugadorEncontrado.rut);
     if (yaRegistrado) {
       alert("El jugador ya está en la nómina del partido.");
@@ -115,7 +112,7 @@ export default function PaginaActas() {
         nomina: arrayUnion(nuevoJugadorNomina),
         estado: "En Juego"
       });
-      setPestanaDerecha("nomina"); // Cambiamos la vista a la nómina para confirmar
+      setPestanaDerecha("nomina");
     } catch (error) { console.error(error); }
   };
 
@@ -129,26 +126,33 @@ export default function PaginaActas() {
       equipo: jugadorEncontrado.club,
       minuto: new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })
     };
+    
     try {
       const partidoRef = doc(db, "asociaciones/san_fabian/partidos", partidoActivo.id);
       let golesL = partidoActivo.golesLocal || 0;
       let golesV = partidoActivo.golesVisita || 0;
+      
+      // LÓGICA DE GOLES Y AUTOGOLES
       if (tipoEvento === '⚽ Gol') {
         if (jugadorEncontrado.club === partidoActivo.local) golesL += 1;
         else golesV += 1;
+      } else if (tipoEvento === '⚽❌ Autogol') {
+        // AUTOGOL: Suma al equipo contrario
+        if (jugadorEncontrado.club === partidoActivo.local) golesV += 1;
+        else golesL += 1;
       }
       
-      // Si hace un evento, lo agregamos a la nómina automáticamente por si se les olvidó
       const jugadorParaNomina: JugadorNomina = { rut: jugadorEncontrado.rut, nombre: jugadorEncontrado.nombre, equipo: jugadorEncontrado.club };
       const yaRegistrado = partidoActivo.nomina?.some(j => j.rut === jugadorEncontrado.rut);
 
       await updateDoc(partidoRef, {
         eventos: arrayUnion(nuevoEvento),
-        ...( !yaRegistrado && { nomina: arrayUnion(jugadorParaNomina) } ), // Solo lo agrega a la nómina si no estaba
+        ...( !yaRegistrado && { nomina: arrayUnion(jugadorParaNomina) } ),
         golesLocal: golesL,
         golesVisita: golesV,
         estado: "En Juego"
       });
+      
       setJugadorEncontrado(null);
       setIdInput("");
       setPestanaDerecha("eventos");
@@ -156,7 +160,6 @@ export default function PaginaActas() {
   };
 
   // --- MOTOR DE EDICIÓN / ELIMINACIÓN ---
-
   const eliminarEvento = async (eventoAEliminar: Evento) => {
     if (!partidoActivo) return;
     if (!confirm(`¿Eliminar este evento de ${eventoAEliminar.jugador}?`)) return;
@@ -166,10 +169,13 @@ export default function PaginaActas() {
       let golesL = partidoActivo.golesLocal || 0;
       let golesV = partidoActivo.golesVisita || 0;
 
-      // Si estamos borrando un gol, debemos descontarlo del marcador
+      // REVERSIÓN DE GOLES Y AUTOGOLES
       if (eventoAEliminar.tipo === '⚽ Gol') {
         if (eventoAEliminar.equipo === partidoActivo.local) golesL = Math.max(0, golesL - 1);
         else golesV = Math.max(0, golesV - 1);
+      } else if (eventoAEliminar.tipo === '⚽❌ Autogol') {
+        if (eventoAEliminar.equipo === partidoActivo.local) golesV = Math.max(0, golesV - 1);
+        else golesL = Math.max(0, golesL - 1);
       }
 
       await updateDoc(partidoRef, {
@@ -194,7 +200,19 @@ export default function PaginaActas() {
   const finalizarPartido = async () => {
     if (!partidoActivo) return;
     if (confirm("¿Cerrar acta definitiva? Ya no se podrán agregar más eventos.")) {
-      await updateDoc(doc(db, "asociaciones/san_fabian/partidos", partidoActivo.id), { estado: "Finalizado" });
+      
+      // GENERACIÓN DEL RESPALDO OFICIAL
+      // Limpiamos los nombres de los equipos de espacios raros para la firma
+      const localClean = partidoActivo.local.replace(/\s+/g, '_');
+      const visitaClean = partidoActivo.visita.replace(/\s+/g, '_');
+      const fechaHoy = new Date().toLocaleDateString('es-CL').replace(/\//g, '-');
+      
+      const firmaRespaldo = `F${partidoActivo.fechaNumero}_${localClean}_vs_${visitaClean}_Serie${partidoActivo.serie}_${fechaHoy}`;
+
+      await updateDoc(doc(db, "asociaciones/san_fabian/partidos", partidoActivo.id), { 
+        estado: "Finalizado",
+        respaldoActa: firmaRespaldo
+      });
       setPartidoSeleccionadoId("");
     }
   };
@@ -310,14 +328,16 @@ export default function PaginaActas() {
 
                       <div className="flex items-center gap-2">
                         <div className="h-px bg-slate-200 flex-1"></div>
-                        <span className="text-[10px] font-bold text-slate-400">O REGISTRAR EVENTO DIRECTO</span>
+                        <span className="text-[10px] font-bold text-slate-400">REGISTRAR EVENTO</span>
                         <div className="h-px bg-slate-200 flex-1"></div>
                       </div>
 
-                      <div className="grid grid-cols-3 gap-2">
-                        <button onClick={() => registrarEvento('⚽ Gol')} className="bg-white border-2 border-slate-200 py-3 rounded-xl font-black text-[10px] md:text-xs hover:border-emerald-500 transition shadow-sm">⚽ GOL</button>
-                        <button onClick={() => registrarEvento('🟨 Amarilla')} className="bg-white border-2 border-slate-200 py-3 rounded-xl font-black text-[10px] md:text-xs hover:border-yellow-500 transition shadow-sm">🟨 TA</button>
-                        <button onClick={() => registrarEvento('🟥 Roja')} className="bg-white border-2 border-slate-200 py-3 rounded-xl font-black text-[10px] md:text-xs hover:border-red-500 transition shadow-sm">🟥 TR</button>
+                      {/* AHORA SON 4 BOTONES INCLUYENDO AUTOGOL */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        <button onClick={() => registrarEvento('⚽ Gol')} className="bg-white border-2 border-slate-200 py-2.5 rounded-xl font-black text-[10px] hover:border-emerald-500 transition shadow-sm">⚽ GOL</button>
+                        <button onClick={() => registrarEvento('⚽❌ Autogol')} className="bg-white border-2 border-slate-200 py-2.5 rounded-xl font-black text-[10px] hover:border-orange-500 transition shadow-sm text-slate-600">⚽❌ AUTO</button>
+                        <button onClick={() => registrarEvento('🟨 Amarilla')} className="bg-white border-2 border-slate-200 py-2.5 rounded-xl font-black text-[10px] hover:border-yellow-500 transition shadow-sm">🟨 TA</button>
+                        <button onClick={() => registrarEvento('🟥 Roja')} className="bg-white border-2 border-slate-200 py-2.5 rounded-xl font-black text-[10px] hover:border-red-500 transition shadow-sm">🟥 TR</button>
                       </div>
                     </div>
                   )}
@@ -338,18 +358,11 @@ export default function PaginaActas() {
            {partidoActivo ? (
              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-full min-h-[400px]">
                 
-                {/* PESTAÑAS (TABS) */}
                 <div className="flex bg-slate-100 p-1 border-b border-slate-200">
-                  <button 
-                    onClick={() => setPestanaDerecha("eventos")} 
-                    className={`flex-1 py-3 text-xs md:text-sm font-bold rounded-xl transition ${pestanaDerecha === "eventos" ? "bg-white text-[#1e3a8a] shadow-sm" : "text-slate-500 hover:bg-slate-200"}`}
-                  >
+                  <button onClick={() => setPestanaDerecha("eventos")} className={`flex-1 py-3 text-xs md:text-sm font-bold rounded-xl transition ${pestanaDerecha === "eventos" ? "bg-white text-[#1e3a8a] shadow-sm" : "text-slate-500 hover:bg-slate-200"}`}>
                     ⏱️ Sucesos
                   </button>
-                  <button 
-                    onClick={() => setPestanaDerecha("nomina")} 
-                    className={`flex-1 py-3 text-xs md:text-sm font-bold rounded-xl transition ${pestanaDerecha === "nomina" ? "bg-white text-[#1e3a8a] shadow-sm" : "text-slate-500 hover:bg-slate-200"}`}
-                  >
+                  <button onClick={() => setPestanaDerecha("nomina")} className={`flex-1 py-3 text-xs md:text-sm font-bold rounded-xl transition ${pestanaDerecha === "nomina" ? "bg-white text-[#1e3a8a] shadow-sm" : "text-slate-500 hover:bg-slate-200"}`}>
                     📋 Nómina Oficial
                   </button>
                 </div>
@@ -362,13 +375,16 @@ export default function PaginaActas() {
                       {partidoActivo.eventos?.length ? [...partidoActivo.eventos].reverse().map((ev, i) => (
                         <div key={ev.id || i} className="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-xl shadow-sm hover:border-blue-200 transition group">
                           <div className="flex items-center gap-3 min-w-0">
-                            <span className="text-xl md:text-2xl shrink-0">{ev.tipo.includes('Gol') ? '⚽' : ev.tipo.includes('Amarilla') ? '🟨' : '🟥'}</span>
+                            <span className="text-xl md:text-2xl shrink-0">
+                              {ev.tipo === '⚽ Gol' ? '⚽' : ev.tipo === '⚽❌ Autogol' ? '⚽❌' : ev.tipo.includes('Amarilla') ? '🟨' : '🟥'}
+                            </span>
                             <div className="min-w-0">
-                              <p className="font-bold text-slate-800 text-[10px] md:text-xs uppercase truncate">{ev.jugador}</p>
+                              <p className="font-bold text-slate-800 text-[10px] md:text-xs uppercase truncate">
+                                {ev.jugador} {ev.tipo === '⚽❌ Autogol' && <span className="text-orange-500 lowercase font-medium text-[9px]">(autogol)</span>}
+                              </p>
                               <p className="text-[8px] md:text-[10px] font-bold text-blue-600 truncate">{ev.equipo} • {ev.minuto}</p>
                             </div>
                           </div>
-                          {/* BOTÓN ELIMINAR EVENTO */}
                           <button onClick={() => eliminarEvento(ev)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition" title="Eliminar este evento">
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                           </button>
@@ -380,7 +396,6 @@ export default function PaginaActas() {
                   {/* VISTA: NÓMINA */}
                   {pestanaDerecha === "nomina" && (
                     <div className="space-y-6">
-                      {/* Nómina Local */}
                       <div>
                         <h4 className="text-[10px] md:text-xs font-black text-slate-400 uppercase tracking-wider mb-2 border-b pb-1">Local: {partidoActivo.local}</h4>
                         <div className="space-y-1">
@@ -394,7 +409,6 @@ export default function PaginaActas() {
                         </div>
                       </div>
                       
-                      {/* Nómina Visita */}
                       <div>
                         <h4 className="text-[10px] md:text-xs font-black text-slate-400 uppercase tracking-wider mb-2 border-b pb-1">Visita: {partidoActivo.visita}</h4>
                         <div className="space-y-1">
