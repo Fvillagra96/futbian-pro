@@ -160,7 +160,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="max-w-7xl mx-auto px-4 text-center">
             <p className="text-slate-400 text-xs font-medium uppercase tracking-widest mb-2">Plataforma Oficial de Gestión Deportiva</p>
             <div className="h-px w-12 bg-slate-200 mx-auto mb-4"></div>
-            <p className="text-slate-700 text-sm font-bold italic"># página creada por Fabián Villagra #</p>
+            <p className="text-slate-700 text-sm font-bold italic"> página desarrollada por Fabián Villagra </p>
             <p className="text-slate-400 text-[10px] mt-4">© {new Date().getFullYear()} Asociación de Fútbol San Fabián.</p>
           </div>
         </footer>
