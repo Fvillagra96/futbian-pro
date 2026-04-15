@@ -3,7 +3,14 @@ import { useState, useEffect, useMemo } from "react";
 import { db } from "@/lib/firebase";
 import { collection, onSnapshot, query, doc } from "firebase/firestore";
 
-interface AsociacionInfo { nombre?: string; logoUrl?: string; instagram?: string; facebook?: string; }
+interface AsociacionInfo { 
+  nombre?: string; 
+  logoUrl?: string; 
+  instagram?: string; 
+  facebook?: string;
+  auspiciadorNombre?: string;
+  auspiciadorLogo?: string; 
+}
 interface ClubData { nombre: string; logoUrl?: string; instagram?: string; facebook?: string; }
 interface Evento { tipo: string; equipo: string; jugador: string; rut: string; }
 interface Partido { local: string; visita: string; golesLocal: number; golesVisita: number; estado: string; serie: string; eventos?: Evento[]; }
@@ -74,7 +81,6 @@ export default function HomeDashboard() {
         stats[p.local].ga += p.golesLocal || 0; stats[p.local].gc += p.golesVisita || 0;
         stats[p.visita].ga += p.golesVisita || 0; stats[p.visita].gc += p.golesLocal || 0;
 
-        // LÓGICA DE PUNTOS: 3 por ganar, 1 por empatar, 0 por perder
         if (p.golesLocal > p.golesVisita) {
           stats[p.local].pg += 1; stats[p.local].pts += 3; stats[p.visita].pp += 1;
         } else if (p.golesLocal < p.golesVisita) {
@@ -90,7 +96,6 @@ export default function HomeDashboard() {
       }
     });
 
-    // LÓGICA DE DESEMPATE: 1° PTS, 2° DG, 3° Orden Alfabético
     return Object.values(stats)
       .map(c => ({ ...c, dg: c.ga - c.gc }))
       .sort((a, b) => b.pts - a.pts || b.dg - a.dg || a.nombre.localeCompare(b.nombre));
@@ -191,9 +196,10 @@ export default function HomeDashboard() {
   return (
     <div className="max-w-7xl mx-auto space-y-4 md:space-y-8 p-2">
       
-      {/* Banner Principal con Logo y Redes de la Asociación */}
+      {/* Banner Principal con Logo, Redes y Auspiciador */}
       <div className="bg-[#1e3a8a] rounded-3xl p-5 md:p-10 text-white relative overflow-hidden shadow-2xl">
         <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 md:gap-6">
+          
           <div className="flex items-center gap-4 md:gap-6 w-full md:w-auto">
             {infoAsociacion?.logoUrl ? (
               <img src={infoAsociacion.logoUrl} alt="Logo" className="w-16 h-16 md:w-32 md:h-32 object-contain bg-white rounded-full p-1.5 md:p-2 shadow-lg shrink-0" />
@@ -201,25 +207,44 @@ export default function HomeDashboard() {
               <div className="w-16 h-16 md:w-32 md:h-32 bg-white/10 rounded-full flex items-center justify-center text-3xl md:text-4xl shadow-lg shrink-0">⚽</div>
             )}
             <div>
-              <h2 className="text-blue-300 font-black uppercase tracking-[0.2em] text-[9px] md:text-xs mb-1">ASOCIACIÓN DE FÚTBOL SAN FABIÁN</h2>
+              <h2 className="text-blue-300 font-black uppercase tracking-[0.2em] text-[9px] md:text-xs mb-1">Asociación Oficial</h2>
               <h1 className="text-xl md:text-5xl font-black tracking-tighter italic leading-tight">
-                {infoAsociacion?.nombre || "MINAS ÑUBLE 2026"}
+                {infoAsociacion?.nombre || "FUTBIAN.PRO"}
               </h1>
               <div className="flex flex-wrap gap-2 mt-2 md:mt-4">
                 {infoAsociacion?.instagram && (
                   <a href={infoAsociacion.instagram} target="_blank" className="bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-[9px] md:text-xs font-bold backdrop-blur-sm border border-white/10">
-                    <span className="text-xs md:text-lg">🅾</span> Instagram
+                    <span className="text-xs md:text-lg">📸</span> Instagram
                   </a>
                 )}
                 {infoAsociacion?.facebook && (
                   <a href={infoAsociacion.facebook} target="_blank" className="bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-[9px] md:text-xs font-bold backdrop-blur-sm border border-white/10">
-                    <span className="text-xs md:text-lg">ⓕ</span> Facebook
+                    <span className="text-xs md:text-lg">📘</span> Facebook
                   </a>
                 )}
               </div>
             </div>
           </div>
-          <div className="hidden lg:block text-[120px] opacity-20 transform rotate-12 scale-150 translate-x-4">⚽</div>
+
+          {/* SECCIÓN DE AUSPICIADOR */}
+          {(infoAsociacion?.auspiciadorNombre || infoAsociacion?.auspiciadorLogo) ? (
+            <div className="w-full md:w-auto mt-2 md:mt-0 flex flex-col items-center md:items-end bg-white/10 p-3 md:p-5 rounded-2xl backdrop-blur-md border border-white/20 shadow-inner">
+              <span className="text-[8px] md:text-[10px] text-blue-200 font-black uppercase tracking-[0.2em] mb-1 md:mb-2 text-center md:text-right">
+                Campeonato Auspiciado Por
+              </span>
+              <div className="flex items-center justify-center md:justify-end gap-3">
+                {infoAsociacion?.auspiciadorLogo && (
+                  <img src={infoAsociacion.auspiciadorLogo} alt="Sponsor" className="h-8 md:h-14 object-contain drop-shadow-md bg-white/80 rounded p-1" />
+                )}
+                {infoAsociacion?.auspiciadorNombre && (
+                  <span className="text-base md:text-2xl font-black italic tracking-tight">{infoAsociacion.auspiciadorNombre}</span>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="hidden lg:block text-[120px] opacity-10 transform rotate-12 scale-150 translate-x-4">⚽</div>
+          )}
+
         </div>
       </div>
 
@@ -229,7 +254,7 @@ export default function HomeDashboard() {
           <button 
             key={v}
             onClick={() => setVistaActiva(v as any)}
-            className={`shrink-0 px-4 md:px-6 py-2.5 md:py-3 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all ${vistaActiva === v ? "bg-[#93af15] text-white shadow-xl scale-105" : "bg-white text-slate-400 border border-slate-200"}`}
+            className={`shrink-0 px-4 md:px-6 py-2.5 md:py-3 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all ${vistaActiva === v ? "bg-[#1e3a8a] text-white shadow-xl scale-105" : "bg-white text-slate-400 border border-slate-200"}`}
           >
             {v === 'general' ? '🏆 General' : v === 'series' ? '📊 Por Series' : '⚽ Goleadores'}
           </button>
