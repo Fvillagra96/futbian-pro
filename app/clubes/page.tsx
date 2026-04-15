@@ -16,7 +16,7 @@ export default function PaginaClubesAdmin() {
   const [seriesSeleccionadas, setSeriesSeleccionadas] = useState<string[]>([]);
 
   const clubesRef = collection(db, "asociaciones/san_fabian/clubes");
-  const todasLasSeries = ["Honor", "Segunda", "Senior 35", "Senior 40", "Infantil", "Damas"];
+  const todasLasSeries = ["Honor", "Segunda", "Senior 35", "Senior 40", "Juvenil", "Damas"];
 
   // 1. VERIFICAR PERMISOS (SOLO ADMIN PUEDE VER ESTO)
   useEffect(() => {
