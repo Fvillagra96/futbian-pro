@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect } from "react";
 import { db, auth } from "@/lib/firebase";
-import { collection, onSnapshot, query, orderBy, doc, updateDoc, arrayRemove, getDoc } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, doc, updateDoc, arrayRemove, arrayUnion, getDoc } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 
 interface Jugador { id: string; nombre: string; rut: string; club: string; serie: string; partidosSuspendido?: number; }
@@ -41,7 +41,6 @@ export default function TribunalDisciplina() {
     if (rolUsuario !== 'admin') return;
 
     const unsubP = onSnapshot(query(collection(db, "asociaciones/san_fabian/partidos"), orderBy("fechaNumero")), (snap) => {
-      // Solo cargamos los partidos finalizados para auditoría
       const filtrados = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Partido[];
       setPartidosFinalizados(filtrados.filter(p => p.estado === "Finalizado"));
     });
@@ -55,17 +54,16 @@ export default function TribunalDisciplina() {
 
   const partidoActivo = partidosFinalizados.find(p => p.id === partidoSeleccionadoId);
 
-  // --- MOTOR DE AUDITORÍA (ELIMINAR EVENTOS ERRÓNEOS) ---
+  // --- MOTOR DE AUDITORÍA: ELIMINAR EVENTOS ERRÓNEOS ---
   const eliminarEvento = async (eventoAEliminar: Evento) => {
     if (!partidoActivo) return;
-    if (!confirm(`AUDITORÍA: ¿Estás seguro de eliminar este evento de ${eventoAEliminar.jugador}? Esto recalculará la tabla de posiciones inmediatamente.`)) return;
+    if (!confirm(`AUDITORÍA: ¿Eliminar este evento de ${eventoAEliminar.jugador}? Esto descontará goles si corresponde y recalculará la tabla.`)) return;
 
     try {
       const partidoRef = doc(db, "asociaciones/san_fabian/partidos", partidoActivo.id);
       let golesL = partidoActivo.golesLocal || 0;
       let golesV = partidoActivo.golesVisita || 0;
 
-      // Si borramos un gol, lo descontamos para arreglar la tabla
       if (eventoAEliminar.tipo === '⚽ Gol') {
         if (eventoAEliminar.equipo === partidoActivo.local) golesL = Math.max(0, golesL - 1);
         else golesV = Math.max(0, golesV - 1);
@@ -79,8 +77,42 @@ export default function TribunalDisciplina() {
         golesLocal: golesL,
         golesVisita: golesV
       });
-      alert("Evento eliminado y acta recalculada.");
     } catch (error) { console.error("Error al auditar evento", error); }
+  };
+
+  // --- MOTOR DE AUDITORÍA: AGREGAR EVENTOS FALTANTES/CORRECCIONES ---
+  const agregarEventoAuditoria = async (rutJugador: string, nombreJugador: string, equipo: string, tipoEvento: string) => {
+    if (!partidoActivo) return;
+    if (!confirm(`AUDITORÍA: ¿Forzar registro de ${tipoEvento} para ${nombreJugador}? Esto sumará al marcador si corresponde.`)) return;
+
+    const nuevoEvento: Evento = {
+      id: Date.now().toString(),
+      tipo: tipoEvento,
+      jugador: nombreJugador,
+      rut: rutJugador,
+      equipo: equipo,
+      minuto: "Admin" // Se marca como Admin para saber que fue por secretaría
+    };
+
+    try {
+      const partidoRef = doc(db, "asociaciones/san_fabian/partidos", partidoActivo.id);
+      let golesL = partidoActivo.golesLocal || 0;
+      let golesV = partidoActivo.golesVisita || 0;
+
+      if (tipoEvento === '⚽ Gol') {
+        if (equipo === partidoActivo.local) golesL += 1;
+        else golesV += 1;
+      } else if (tipoEvento === '⚽❌ Autogol') {
+        if (equipo === partidoActivo.local) golesV += 1;
+        else golesL += 1;
+      }
+
+      await updateDoc(partidoRef, {
+        eventos: arrayUnion(nuevoEvento),
+        golesLocal: golesL,
+        golesVisita: golesV
+      });
+    } catch (error) { console.error("Error al forzar evento", error); }
   };
 
   // --- MOTOR DEL TRIBUNAL DE DISCIPLINA ---
@@ -91,18 +123,15 @@ export default function TribunalDisciplina() {
     if (!confirm(`¿Sancionar a ${nombreJugador} con ${cantidadFechas} partidos de suspensión?`)) return;
 
     try {
-      // Como migramos tu BD para que el ID sea el RUT, podemos actualizar directo
       const rutLimpio = rutJugador.replace(/[^0-9kK]/g, "").toUpperCase();
       await updateDoc(doc(db, "asociaciones/san_fabian/jugadores", rutLimpio), {
         partidosSuspendido: cantidadFechas
       });
-      
-      // Limpiamos el input
       setSancionesInput(prev => ({...prev, [rutJugador]: 0}));
-      alert(`Sanción de ${cantidadFechas} fechas aplicada a ${nombreJugador}.`);
+      alert(`Sanción aplicada con éxito.`);
     } catch (error) { 
       console.error(error);
-      alert("Error al aplicar la sanción. Revisa si el jugador está en la base de datos.");
+      alert("Error al aplicar la sanción.");
     }
   };
 
@@ -174,7 +203,7 @@ export default function TribunalDisciplina() {
            {partidoActivo ? (
              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-h-[500px]">
                 
-                {/* LISTADO DE SUCESOS (EDICIÓN) */}
+                {/* LISTADO DE SUCESOS (EDICIÓN Y BORRADO) */}
                 <div className="p-6 border-b border-slate-100">
                    <h3 className="font-black text-slate-800 flex items-center gap-2 mb-4">
                      <span className="text-xl">⏱️</span> Registro de Sucesos (Edición)
@@ -186,7 +215,7 @@ export default function TribunalDisciplina() {
                             <span className="text-xl">{ev.tipo === '⚽ Gol' ? '⚽' : ev.tipo === '⚽❌ Autogol' ? '⚽❌' : ev.tipo.includes('Amarilla') ? '🟨' : '🟥'}</span>
                             <div>
                               <p className="font-bold text-slate-800 text-xs uppercase">{ev.jugador}</p>
-                              <p className="text-[10px] font-bold text-blue-600">{ev.equipo} • Minuto {ev.minuto}</p>
+                              <p className="text-[10px] font-bold text-blue-600">{ev.equipo} • Minuto: {ev.minuto}</p>
                             </div>
                           </div>
                           <button onClick={() => eliminarEvento(ev)} className="px-3 py-1.5 bg-white text-red-500 border border-red-100 hover:bg-red-500 hover:text-white font-bold text-[10px] rounded-lg transition shadow-sm">
@@ -197,25 +226,34 @@ export default function TribunalDisciplina() {
                    </div>
                 </div>
 
-                {/* ZONA DE CASTIGOS */}
+                {/* ZONA DE NÓMINA (AGREGAR EVENTOS FALTANTES Y SANCIONAR) */}
                 <div className="p-6 bg-slate-50 flex-1">
                    <h3 className="font-black text-slate-800 flex items-center gap-2 mb-4">
-                     <span className="text-xl">⚖️</span> Sanciones Deportivas (Nómina Completa)
+                     <span className="text-xl">⚖️</span> Forzar Eventos y Sanciones
                    </h3>
+                   <p className="text-xs text-slate-500 mb-6">Si necesitas cambiar un gol, elimina el evento erróneo arriba y luego asígnalo al jugador correcto aquí abajo usando los botones.</p>
                    
                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       {/* NÓMINA LOCAL */}
                       <div>
                          <h4 className="text-[10px] font-black text-slate-400 uppercase border-b border-slate-200 pb-2 mb-3">Local: {partidoActivo.local}</h4>
-                         <div className="space-y-2">
+                         <div className="space-y-3">
                            {partidoActivo.nomina?.filter(j => j.equipo === partidoActivo.local).map((jugador, i) => {
-                             // Buscar si el jugador actual ya tiene una sanción en la BD
                              const datosBD = jugadores.find(jBD => jBD.rut === jugador.rut);
                              const suspendido = datosBD?.partidosSuspendido ? datosBD.partidosSuspendido > 0 : false;
 
                              return (
                                <div key={i} className="p-3 bg-white border border-slate-200 rounded-xl shadow-sm">
-                                  <p className="text-xs font-bold text-slate-800 uppercase truncate mb-2">{jugador.nombre}</p>
+                                  <p className="text-[11px] font-bold text-slate-800 uppercase truncate mb-2">{jugador.nombre}</p>
+                                  
+                                  {/* BOTONES FORZAR EVENTO ADMIN */}
+                                  <div className="flex gap-1 mb-3">
+                                    <button onClick={() => agregarEventoAuditoria(jugador.rut, jugador.nombre, jugador.equipo, '⚽ Gol')} className="flex-1 bg-slate-100 hover:bg-emerald-100 border border-slate-200 rounded text-[10px] py-1 font-black transition">⚽ GOL</button>
+                                    <button onClick={() => agregarEventoAuditoria(jugador.rut, jugador.nombre, jugador.equipo, '🟨 Amarilla')} className="flex-1 bg-slate-100 hover:bg-yellow-100 border border-slate-200 rounded text-[10px] py-1 font-black transition">🟨 TA</button>
+                                    <button onClick={() => agregarEventoAuditoria(jugador.rut, jugador.nombre, jugador.equipo, '🟥 Roja')} className="flex-1 bg-slate-100 hover:bg-red-100 border border-slate-200 rounded text-[10px] py-1 font-black transition">🟥 TR</button>
+                                  </div>
+
+                                  {/* ZONA DE SANCIÓN */}
                                   {suspendido ? (
                                     <div className="bg-red-50 text-red-600 text-[10px] font-black px-2 py-1 rounded text-center border border-red-100">
                                       SUSPENDIDO ({datosBD?.partidosSuspendido} FECHAS)
@@ -226,7 +264,7 @@ export default function TribunalDisciplina() {
                                         type="number" min="0" placeholder="Fechas" 
                                         value={sancionesInput[jugador.rut] || ""}
                                         onChange={(e) => handleSancionChange(jugador.rut, parseInt(e.target.value) || 0)}
-                                        className="w-16 p-1.5 text-xs text-center border border-slate-300 rounded outline-none" 
+                                        className="w-16 p-1.5 text-xs text-center border border-slate-300 rounded outline-none bg-slate-50" 
                                       />
                                       <button onClick={() => aplicarSancion(jugador.rut, jugador.nombre)} className="flex-1 bg-slate-800 text-white text-[10px] font-bold rounded hover:bg-black transition">
                                         SANCIONAR
@@ -242,14 +280,23 @@ export default function TribunalDisciplina() {
                       {/* NÓMINA VISITA */}
                       <div>
                          <h4 className="text-[10px] font-black text-slate-400 uppercase border-b border-slate-200 pb-2 mb-3">Visita: {partidoActivo.visita}</h4>
-                         <div className="space-y-2">
+                         <div className="space-y-3">
                            {partidoActivo.nomina?.filter(j => j.equipo === partidoActivo.visita).map((jugador, i) => {
                              const datosBD = jugadores.find(jBD => jBD.rut === jugador.rut);
                              const suspendido = datosBD?.partidosSuspendido ? datosBD.partidosSuspendido > 0 : false;
 
                              return (
                                <div key={i} className="p-3 bg-white border border-slate-200 rounded-xl shadow-sm">
-                                  <p className="text-xs font-bold text-slate-800 uppercase truncate mb-2">{jugador.nombre}</p>
+                                  <p className="text-[11px] font-bold text-slate-800 uppercase truncate mb-2">{jugador.nombre}</p>
+                                  
+                                  {/* BOTONES FORZAR EVENTO ADMIN */}
+                                  <div className="flex gap-1 mb-3">
+                                    <button onClick={() => agregarEventoAuditoria(jugador.rut, jugador.nombre, jugador.equipo, '⚽ Gol')} className="flex-1 bg-slate-100 hover:bg-emerald-100 border border-slate-200 rounded text-[10px] py-1 font-black transition">⚽ GOL</button>
+                                    <button onClick={() => agregarEventoAuditoria(jugador.rut, jugador.nombre, jugador.equipo, '🟨 Amarilla')} className="flex-1 bg-slate-100 hover:bg-yellow-100 border border-slate-200 rounded text-[10px] py-1 font-black transition">🟨 TA</button>
+                                    <button onClick={() => agregarEventoAuditoria(jugador.rut, jugador.nombre, jugador.equipo, '🟥 Roja')} className="flex-1 bg-slate-100 hover:bg-red-100 border border-slate-200 rounded text-[10px] py-1 font-black transition">🟥 TR</button>
+                                  </div>
+
+                                  {/* ZONA DE SANCIÓN */}
                                   {suspendido ? (
                                     <div className="bg-red-50 text-red-600 text-[10px] font-black px-2 py-1 rounded text-center border border-red-100">
                                       SUSPENDIDO ({datosBD?.partidosSuspendido} FECHAS)
@@ -260,7 +307,7 @@ export default function TribunalDisciplina() {
                                         type="number" min="0" placeholder="Fechas" 
                                         value={sancionesInput[jugador.rut] || ""}
                                         onChange={(e) => handleSancionChange(jugador.rut, parseInt(e.target.value) || 0)}
-                                        className="w-16 p-1.5 text-xs text-center border border-slate-300 rounded outline-none" 
+                                        className="w-16 p-1.5 text-xs text-center border border-slate-300 rounded outline-none bg-slate-50" 
                                       />
                                       <button onClick={() => aplicarSancion(jugador.rut, jugador.nombre)} className="flex-1 bg-slate-800 text-white text-[10px] font-bold rounded hover:bg-black transition">
                                         SANCIONAR
