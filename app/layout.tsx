@@ -85,6 +85,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                      <>
                        <Link href="/clubes" className="bg-blue-700 hover:bg-blue-600 px-3 py-2 rounded-md text-sm font-bold transition ml-4">🛡️ Admin Clubes</Link>
                        <Link href="/admin/programacion" className="bg-blue-700 hover:bg-blue-600 px-3 py-2 rounded-md text-sm font-bold transition ml-2">📅 Fechas</Link>
+                       <Link href="/admin/actas" className="bg-red-600 hover:bg-red-500 px-3 py-2 rounded-md text-sm font-bold transition ml-2 shadow-sm border border-red-400">⚖️ Tribunal</Link>
                      </>
                   )}
                 </div>
