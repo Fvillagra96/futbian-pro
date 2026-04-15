@@ -69,7 +69,6 @@ export default function PaginaActas() {
 
   const partidoActivo = partidos.find(p => p.id === partidoSeleccionadoId);
   
-  // --- MOTOR DE BÚSQUEDA CORREGIDO Y BLINDADO ---
   const buscarPorId = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorBusqueda("");
@@ -77,18 +76,12 @@ export default function PaginaActas() {
     if (!partidoActivo || !equipoSeleccionado) return;
     
     const clubABuscar = equipoSeleccionado === "local" ? partidoActivo.local : partidoActivo.visita;
-    
-    // 1. Limpiamos lo que digitó el usuario (solo números y K)
     const rutBuscadoLimpio = idInput.replace(/[^0-9kK]/g, "").toUpperCase();
-    
-    // 2. Limpiamos el nombre del club quitando espacios al inicio/final y pasándolo a minúscula
     const clubABuscarLimpio = clubABuscar.trim().toLowerCase();
     
     const encontrado = jugadores.find(j => {
-      // 3. Limpiamos los datos del jugador en la Base de Datos para comparar
       const rutDBLimpio = j.rut.replace(/[^0-9kK]/g, "").toUpperCase();
       const clubDBLimpio = j.club.trim().toLowerCase();
-      
       return rutDBLimpio === rutBuscadoLimpio && clubDBLimpio === clubABuscarLimpio;
     });
     
@@ -105,9 +98,9 @@ export default function PaginaActas() {
     else { setIdInput(valor.toUpperCase()); }
   };
 
-  // --- MOTOR DE REGISTRO ---
+  // --- MOTOR DE REGISTRO (CORREGIDO PARA IGNORAR ESPACIOS DE LA DB) ---
   const agregarANomina = async () => {
-    if (!partidoActivo || !jugadorEncontrado) return;
+    if (!partidoActivo || !jugadorEncontrado || !equipoSeleccionado) return;
     
     const yaRegistrado = partidoActivo.nomina?.some(j => j.rut === jugadorEncontrado.rut);
     if (yaRegistrado) {
@@ -115,10 +108,13 @@ export default function PaginaActas() {
       return;
     }
 
+    // AQUI ESTÁ LA MAGIA: Forzamos el nombre del club oficial del partido, no el de la ficha del jugador
+    const clubOficial = equipoSeleccionado === "local" ? partidoActivo.local : partidoActivo.visita;
+
     const nuevoJugadorNomina: JugadorNomina = {
       rut: jugadorEncontrado.rut,
       nombre: jugadorEncontrado.nombre,
-      equipo: jugadorEncontrado.club
+      equipo: clubOficial
     };
 
     try {
@@ -131,13 +127,17 @@ export default function PaginaActas() {
   };
 
   const registrarEvento = async (tipoEvento: string) => {
-    if (!partidoActivo || !jugadorEncontrado) return;
+    if (!partidoActivo || !jugadorEncontrado || !equipoSeleccionado) return;
+    
+    // Forzamos el nombre del club oficial para evitar errores
+    const clubOficial = equipoSeleccionado === "local" ? partidoActivo.local : partidoActivo.visita;
+
     const nuevoEvento: Evento = {
       id: Date.now().toString(),
       tipo: tipoEvento,
       jugador: jugadorEncontrado.nombre,
       rut: jugadorEncontrado.rut,
-      equipo: jugadorEncontrado.club,
+      equipo: clubOficial,
       minuto: new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })
     };
     
@@ -146,15 +146,16 @@ export default function PaginaActas() {
       let golesL = partidoActivo.golesLocal || 0;
       let golesV = partidoActivo.golesVisita || 0;
       
+      // LÓGICA DE GOLES BLINDADA CON EL BOTÓN PRESIONADO (No con el texto)
       if (tipoEvento === '⚽ Gol') {
-        if (jugadorEncontrado.club === partidoActivo.local) golesL += 1;
+        if (equipoSeleccionado === "local") golesL += 1;
         else golesV += 1;
       } else if (tipoEvento === '⚽❌ Autogol') {
-        if (jugadorEncontrado.club === partidoActivo.local) golesV += 1;
+        if (equipoSeleccionado === "local") golesV += 1;
         else golesL += 1;
       }
       
-      const jugadorParaNomina: JugadorNomina = { rut: jugadorEncontrado.rut, nombre: jugadorEncontrado.nombre, equipo: jugadorEncontrado.club };
+      const jugadorParaNomina: JugadorNomina = { rut: jugadorEncontrado.rut, nombre: jugadorEncontrado.nombre, equipo: clubOficial };
       const yaRegistrado = partidoActivo.nomina?.some(j => j.rut === jugadorEncontrado.rut);
 
       await updateDoc(partidoRef, {
