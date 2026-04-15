@@ -4,7 +4,7 @@ import { db, auth } from "@/lib/firebase";
 import { collection, onSnapshot, query, orderBy, doc, updateDoc, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 
-// --- Función para formatear RUT Chileno ---
+// --- Función para formatear RUT Chileno en el Input ---
 const formatearRut = (valor: string) => {
   let cuerpo = valor.replace(/[^0-9kK]/g, "").toUpperCase();
   if (cuerpo.length < 7) return cuerpo;
@@ -69,20 +69,34 @@ export default function PaginaActas() {
 
   const partidoActivo = partidos.find(p => p.id === partidoSeleccionadoId);
   
+  // --- MOTOR DE BÚSQUEDA CORREGIDO Y BLINDADO ---
   const buscarPorId = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorBusqueda("");
     setJugadorEncontrado(null);
     if (!partidoActivo || !equipoSeleccionado) return;
+    
     const clubABuscar = equipoSeleccionado === "local" ? partidoActivo.local : partidoActivo.visita;
     
-    const encontrado = jugadores.find(j => 
-      j.rut.toUpperCase() === idInput.toUpperCase() && 
-      j.club === clubABuscar
-    );
+    // 1. Limpiamos lo que digitó el usuario (solo números y K)
+    const rutBuscadoLimpio = idInput.replace(/[^0-9kK]/g, "").toUpperCase();
     
-    if (encontrado) { setJugadorEncontrado(encontrado); } 
-    else { setErrorBusqueda(`ID no encontrado en ${clubABuscar}.`); }
+    // 2. Limpiamos el nombre del club quitando espacios al inicio/final y pasándolo a minúscula
+    const clubABuscarLimpio = clubABuscar.trim().toLowerCase();
+    
+    const encontrado = jugadores.find(j => {
+      // 3. Limpiamos los datos del jugador en la Base de Datos para comparar
+      const rutDBLimpio = j.rut.replace(/[^0-9kK]/g, "").toUpperCase();
+      const clubDBLimpio = j.club.trim().toLowerCase();
+      
+      return rutDBLimpio === rutBuscadoLimpio && clubDBLimpio === clubABuscarLimpio;
+    });
+    
+    if (encontrado) { 
+      setJugadorEncontrado(encontrado); 
+    } else { 
+      setErrorBusqueda(`ID no encontrado en ${clubABuscar}. Revisa si está inscrito en la DB.`); 
+    }
   };
 
   const manejarInputId = (valor: string) => {
@@ -132,12 +146,10 @@ export default function PaginaActas() {
       let golesL = partidoActivo.golesLocal || 0;
       let golesV = partidoActivo.golesVisita || 0;
       
-      // LÓGICA DE GOLES Y AUTOGOLES
       if (tipoEvento === '⚽ Gol') {
         if (jugadorEncontrado.club === partidoActivo.local) golesL += 1;
         else golesV += 1;
       } else if (tipoEvento === '⚽❌ Autogol') {
-        // AUTOGOL: Suma al equipo contrario
         if (jugadorEncontrado.club === partidoActivo.local) golesV += 1;
         else golesL += 1;
       }
@@ -169,7 +181,6 @@ export default function PaginaActas() {
       let golesL = partidoActivo.golesLocal || 0;
       let golesV = partidoActivo.golesVisita || 0;
 
-      // REVERSIÓN DE GOLES Y AUTOGOLES
       if (eventoAEliminar.tipo === '⚽ Gol') {
         if (eventoAEliminar.equipo === partidoActivo.local) golesL = Math.max(0, golesL - 1);
         else golesV = Math.max(0, golesV - 1);
@@ -200,9 +211,6 @@ export default function PaginaActas() {
   const finalizarPartido = async () => {
     if (!partidoActivo) return;
     if (confirm("¿Cerrar acta definitiva? Ya no se podrán agregar más eventos.")) {
-      
-      // GENERACIÓN DEL RESPALDO OFICIAL
-      // Limpiamos los nombres de los equipos de espacios raros para la firma
       const localClean = partidoActivo.local.replace(/\s+/g, '_');
       const visitaClean = partidoActivo.visita.replace(/\s+/g, '_');
       const fechaHoy = new Date().toLocaleDateString('es-CL').replace(/\//g, '-');
@@ -332,7 +340,6 @@ export default function PaginaActas() {
                         <div className="h-px bg-slate-200 flex-1"></div>
                       </div>
 
-                      {/* AHORA SON 4 BOTONES INCLUYENDO AUTOGOL */}
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                         <button onClick={() => registrarEvento('⚽ Gol')} className="bg-white border-2 border-slate-200 py-2.5 rounded-xl font-black text-[10px] hover:border-emerald-500 transition shadow-sm">⚽ GOL</button>
                         <button onClick={() => registrarEvento('⚽❌ Autogol')} className="bg-white border-2 border-slate-200 py-2.5 rounded-xl font-black text-[10px] hover:border-orange-500 transition shadow-sm text-slate-600">⚽❌ AUTO</button>
