@@ -98,7 +98,7 @@ export default function PaginaActas() {
     else { setIdInput(valor.toUpperCase()); }
   };
 
-  // --- MOTOR DE REGISTRO (CORREGIDO PARA IGNORAR ESPACIOS DE LA DB) ---
+  // --- MOTOR DE REGISTRO ---
   const agregarANomina = async () => {
     if (!partidoActivo || !jugadorEncontrado || !equipoSeleccionado) return;
     
@@ -108,7 +108,6 @@ export default function PaginaActas() {
       return;
     }
 
-    // AQUI ESTÁ LA MAGIA: Forzamos el nombre del club oficial del partido, no el de la ficha del jugador
     const clubOficial = equipoSeleccionado === "local" ? partidoActivo.local : partidoActivo.visita;
 
     const nuevoJugadorNomina: JugadorNomina = {
@@ -129,7 +128,6 @@ export default function PaginaActas() {
   const registrarEvento = async (tipoEvento: string) => {
     if (!partidoActivo || !jugadorEncontrado || !equipoSeleccionado) return;
     
-    // Forzamos el nombre del club oficial para evitar errores
     const clubOficial = equipoSeleccionado === "local" ? partidoActivo.local : partidoActivo.visita;
 
     const nuevoEvento: Evento = {
@@ -146,7 +144,6 @@ export default function PaginaActas() {
       let golesL = partidoActivo.golesLocal || 0;
       let golesV = partidoActivo.golesVisita || 0;
       
-      // LÓGICA DE GOLES BLINDADA CON EL BOTÓN PRESIONADO (No con el texto)
       if (tipoEvento === '⚽ Gol') {
         if (equipoSeleccionado === "local") golesL += 1;
         else golesV += 1;
@@ -223,6 +220,34 @@ export default function PaginaActas() {
         respaldoActa: firmaRespaldo
       });
       setPartidoSeleccionadoId("");
+    }
+  };
+
+  // --- NUEVA FUNCIÓN: LIMPIEZA PROFUNDA DE ACTA ---
+  const limpiarActa = async () => {
+    if (!partidoActivo) return;
+    
+    // Doble confirmación de seguridad pidiendo escribir una palabra clave
+    const confirmacion = window.prompt("⚠️ ZONA DE PELIGRO: Vas a borrar todos los datos de este partido (Nómina, Goles y Tarjetas). Si estás seguro, escribe la palabra LIMPIAR a continuación:");
+    
+    if (confirmacion === "LIMPIAR") {
+      try {
+        await updateDoc(doc(db, "asociaciones/san_fabian/partidos", partidoActivo.id), {
+          eventos: [],
+          nomina: [],
+          golesLocal: 0,
+          golesVisita: 0,
+          estado: "Programado" // Volvemos al estado inicial para que no afecte nada
+        });
+        alert("🧹 El acta ha sido reiniciada a cero con éxito.");
+        setJugadorEncontrado(null);
+        setIdInput("");
+      } catch (error) { 
+        console.error(error); 
+        alert("Hubo un error al limpiar el acta.");
+      }
+    } else if (confirmacion !== null) {
+      alert("Operación cancelada. La palabra clave no coincide.");
     }
   };
 
@@ -352,11 +377,18 @@ export default function PaginaActas() {
                 </div>
               )}
 
-              <div className="pt-6 mt-6 border-t border-slate-100">
-                <button onClick={finalizarPartido} className="w-full py-4 bg-red-600 text-white font-black rounded-2xl shadow-lg hover:bg-red-700 transition tracking-widest text-xs md:text-sm">
-                  CERRAR ACTA FINAL
+              {/* ZONA DE BOTONES FINALES */}
+              <div className="pt-6 mt-6 border-t border-slate-100 space-y-3">
+                <button onClick={finalizarPartido} className="w-full py-4 bg-emerald-600 text-white font-black rounded-2xl shadow-lg hover:bg-emerald-700 transition tracking-widest text-xs md:text-sm flex items-center justify-center gap-2">
+                  ✅ CERRAR ACTA FINAL
+                </button>
+                
+                {/* BOTÓN DE LIMPIEZA */}
+                <button onClick={limpiarActa} className="w-full py-3 bg-white border-2 border-red-100 text-red-500 font-bold rounded-2xl shadow-sm hover:bg-red-50 hover:border-red-300 transition text-[10px] md:text-xs flex items-center justify-center gap-2">
+                  🧹 LIMPIAR ACTA Y REINICIAR PARTIDO
                 </button>
               </div>
+
             </div>
           )}
         </div>
