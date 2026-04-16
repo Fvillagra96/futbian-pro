@@ -65,7 +65,7 @@ export default function PaginaLogin() {
 
           <form onSubmit={manejarLogin} className="space-y-5">
             <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase mb-2 ml-1">Correo Electrónico</label>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-2 ml-1">Correo </label>
               <input 
                 type="email" 
                 value={correo} 
