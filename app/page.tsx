@@ -1,333 +1,214 @@
 'use client'
 import { useState, useEffect, useMemo } from "react";
-import { db } from "@/lib/firebase";
-import { collection, onSnapshot, query, doc } from "firebase/firestore";
+import { db, auth } from "@/lib/firebase";
+import { collection, onSnapshot, query, doc, getDoc } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
 
-interface AsociacionInfo { 
-  nombre?: string; 
-  logoUrl?: string; 
-  instagram?: string; 
-  facebook?: string;
-  auspiciadorNombre?: string;
-  auspiciadorLogo?: string; 
+interface Partido { 
+  id: string; estado: string; serie: string; local: string; visita: string; golesLocal: number; golesVisita: number; 
 }
-interface ClubData { nombre: string; logoUrl?: string; instagram?: string; facebook?: string; }
-interface Evento { tipo: string; equipo: string; jugador: string; rut: string; }
-interface Partido { local: string; visita: string; golesLocal: number; golesVisita: number; estado: string; serie: string; eventos?: Evento[]; }
-interface StatsClub { nombre: string; logoUrl: string; instagram: string; facebook: string; pj: number; pg: number; pe: number; pp: number; ga: number; gc: number; dg: number; pts: number; amarillas: number; rojas: number; }
-interface Goleador { rut: string; nombre: string; equipo: string; goles: number; }
+interface Estadisticas {
+  club: string; PJ: number; PG: number; PE: number; PP: number; GF: number; GC: number; DG: number; PTS: number;
+}
+interface AsociacionInfo { nombre?: string; logoUrl?: string; auspiciadorNombre?: string; auspiciadorLogo?: string; }
 
-export default function HomeDashboard() {
-  const [infoAsociacion, setInfoAsociacion] = useState<AsociacionInfo | null>(null);
-  const [partidos, setPartidos] = useState<Partido[]>([]);
-  const [clubesInfo, setClubesInfo] = useState<Record<string, ClubData>>({});
+export default function HomePublico() {
+  const [rolUsuario, setRolUsuario] = useState<string | null>(null);
   const [cargando, setCargando] = useState(true);
-  const [vistaActiva, setVistaActiva] = useState<"general" | "series" | "goleadores">("general");
-  const [serieSeleccionada, setSerieSeleccionada] = useState<string>("");
+  const [partidos, setPartidos] = useState<Partido[]>([]);
+  const [infoAsoc, setInfoAsoc] = useState<AsociacionInfo>({});
 
+  // 1. Verificación de Seguridad y Carga de Datos
   useEffect(() => {
-    const unsubAsociacion = onSnapshot(doc(db, "asociaciones", "san_fabian"), (docSnap) => {
-      if (docSnap.exists()) setInfoAsociacion(docSnap.data() as AsociacionInfo);
+    const unsubAuth = onAuthStateChanged(auth, async (user) => {
+      if (user?.email) {
+        const docSnap = await getDoc(doc(db, "asociaciones/san_fabian/usuarios_permisos", user.email));
+        if (docSnap.exists()) setRolUsuario(docSnap.data().rol);
+      } else {
+        setRolUsuario(null);
+      }
     });
 
-    const unsubClubes = onSnapshot(collection(db, "asociaciones/san_fabian/clubes"), (snap) => {
-      const info: Record<string, ClubData> = {};
-      snap.docs.forEach(d => {
-        const data = d.data() as ClubData;
-        info[data.nombre] = data;
-      });
-      setClubesInfo(info);
+    const unsubAsoc = onSnapshot(doc(db, "asociaciones", "san_fabian"), (docSnap) => {
+      if (docSnap.exists()) setInfoAsoc(docSnap.data() as AsociacionInfo);
     });
 
-    const unsubPartidos = onSnapshot(query(collection(db, "asociaciones/san_fabian/partidos")), (snap) => {
-      setPartidos(snap.docs.map(d => d.data() as Partido));
+    const unsubP = onSnapshot(query(collection(db, "asociaciones/san_fabian/partidos")), (snap) => {
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Partido[];
+      setPartidos(data.filter(p => p.estado === "Finalizado")); // Solo calculamos con actas cerradas
       setCargando(false);
     });
 
-    return () => { unsubAsociacion(); unsubClubes(); unsubPartidos(); };
+    return () => { unsubAuth(); unsubAsoc(); unsubP(); };
   }, []);
 
-  const seriesDisponibles = useMemo(() => {
-    const series = new Set<string>();
-    partidos.forEach(p => p.serie && series.add(p.serie));
-    return Array.from(series).sort();
-  }, [partidos]);
+  // 2. Motor de Cálculo de Estadísticas Automáticas
+  const { tablaPorSerie, tablaGeneral } = useMemo(() => {
+    const series: Record<string, Record<string, Estadisticas>> = {};
+    const general: Record<string, Estadisticas> = {};
 
-  useEffect(() => {
-    if (seriesDisponibles.length > 0 && !serieSeleccionada) setSerieSeleccionada(seriesDisponibles[0]);
-  }, [seriesDisponibles]);
+    const inicializarStats = (club: string, serie: string) => {
+      if (!series[serie]) series[serie] = {};
+      if (!series[serie][club]) series[serie][club] = { club, PJ: 0, PG: 0, PE: 0, PP: 0, GF: 0, GC: 0, DG: 0, PTS: 0 };
+      if (!general[club]) general[club] = { club, PJ: 0, PG: 0, PE: 0, PP: 0, GF: 0, GC: 0, DG: 0, PTS: 0 };
+    };
 
-  // --- MOTOR DE TABLAS AVANZADO ---
-  const procesarTabla = (filtroSerie?: string) => {
-    const stats: Record<string, StatsClub> = {};
-    
+    const sumarStats = (club: string, serie: string, golesF: number, golesC: number) => {
+      let pts = 0; let pg = 0; let pe = 0; let pp = 0;
+      if (golesF > golesC) { pts = 3; pg = 1; }
+      else if (golesF === golesC) { pts = 1; pe = 1; }
+      else { pp = 1; }
+
+      // Suma a la serie
+      const s = series[serie][club];
+      s.PJ++; s.PG += pg; s.PE += pe; s.PP += pp; s.GF += golesF; s.GC += golesC; s.DG = s.GF - s.GC; s.PTS += pts;
+
+      // Suma a la General
+      const g = general[club];
+      g.PJ++; g.PG += pg; g.PE += pe; g.PP += pp; g.GF += golesF; g.GC += golesC; g.DG = g.GF - g.GC; g.PTS += pts;
+    };
+
     partidos.forEach(p => {
-      if (filtroSerie && p.serie !== filtroSerie) return;
-
-      [p.local, p.visita].forEach(nombre => {
-        if (!stats[nombre]) {
-          stats[nombre] = { 
-            nombre, 
-            logoUrl: clubesInfo[nombre]?.logoUrl || "", 
-            instagram: clubesInfo[nombre]?.instagram || "",
-            facebook: clubesInfo[nombre]?.facebook || "",
-            pj: 0, pg: 0, pe: 0, pp: 0, ga: 0, gc: 0, dg: 0, pts: 0, amarillas: 0, rojas: 0 
-          };
-        }
-      });
-
-      if (p.estado === "Finalizado") {
-        stats[p.local].pj += 1; stats[p.visita].pj += 1;
-        stats[p.local].ga += p.golesLocal || 0; stats[p.local].gc += p.golesVisita || 0;
-        stats[p.visita].ga += p.golesVisita || 0; stats[p.visita].gc += p.golesLocal || 0;
-
-        if (p.golesLocal > p.golesVisita) {
-          stats[p.local].pg += 1; stats[p.local].pts += 3; stats[p.visita].pp += 1;
-        } else if (p.golesLocal < p.golesVisita) {
-          stats[p.visita].pg += 1; stats[p.visita].pts += 3; stats[p.local].pp += 1;
-        } else {
-          stats[p.local].pe += 1; stats[p.local].pts += 1; stats[p.visita].pe += 1; stats[p.visita].pts += 1;
-        }
-
-        p.eventos?.forEach(ev => {
-          if (ev.tipo.includes('Amarilla') && stats[ev.equipo]) stats[ev.equipo].amarillas += 1;
-          if (ev.tipo.includes('Roja') && stats[ev.equipo]) stats[ev.equipo].rojas += 1;
-        });
-      }
+      inicializarStats(p.local, p.serie);
+      inicializarStats(p.visita, p.serie);
+      sumarStats(p.local, p.serie, p.golesLocal || 0, p.golesVisita || 0);
+      sumarStats(p.visita, p.serie, p.golesVisita || 0, p.golesLocal || 0);
     });
 
-    return Object.values(stats)
-      .map(c => ({ ...c, dg: c.ga - c.gc }))
-      .sort((a, b) => b.pts - a.pts || b.dg - a.dg || a.nombre.localeCompare(b.nombre));
-  };
+    // Ordenar tablas: Puntos > Diferencia de Goles > Goles a Favor
+    const ordenarTabla = (tabla: Record<string, Estadisticas>) => Object.values(tabla).sort((a, b) => b.PTS - a.PTS || b.DG - a.DG || b.GF - a.GF);
 
-  const tablaGeneral = useMemo(() => procesarTabla(), [partidos, clubesInfo]);
-  const tablaSerie = useMemo(() => procesarTabla(serieSeleccionada), [partidos, serieSeleccionada, clubesInfo]);
+    const tablaSeriesOrdenada: Record<string, Estadisticas[]> = {};
+    Object.keys(series).forEach(serie => { tablaSeriesOrdenada[serie] = ordenarTabla(series[serie]); });
 
-  // --- MOTOR DE GOLEADORES ---
-  const listaGoleadores = useMemo(() => {
-    const stats: Record<string, Goleador> = {};
-    partidos.forEach(p => {
-      if (p.estado === "Finalizado" && p.eventos) {
-        p.eventos.forEach(ev => {
-          if (ev.tipo === '⚽ Gol') {
-            const key = ev.rut;
-            if (!stats[key]) stats[key] = { rut: ev.rut, nombre: ev.jugador, equipo: ev.equipo, goles: 0 };
-            stats[key].goles += 1;
-          }
-        });
-      }
-    });
-    return Object.values(stats).sort((a, b) => b.goles - a.goles).slice(0, 15);
+    return { tablaPorSerie: tablaSeriesOrdenada, tablaGeneral: ordenarTabla(general) };
   }, [partidos]);
 
-  // --- COMPONENTE DE TABLA ULTRA-COMPACTA ---
-  const renderTabla = (datos: StatsClub[]) => (
-    <div className="w-full overflow-x-auto pb-2">
-      {datos.length === 0 ? (
-        <div className="p-12 text-center text-slate-500 font-medium">Aún no hay equipos registrados.</div>
-      ) : (
-        <table className="w-full min-w-max text-center border-collapse whitespace-nowrap">
-          <thead>
-            <tr className="bg-slate-50 text-slate-500 text-[9px] md:text-xs uppercase tracking-widest border-b">
-              <th className="p-2 md:p-4 text-center w-8 md:w-12">Pos</th>
-              <th className="p-2 md:p-4 text-left sticky left-0 bg-slate-50 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.05)]">Club</th>
-              <th className="p-2 md:p-4 font-black text-[#1e3a8a]" title="Puntos">Pts</th>
-              <th className="p-2 md:p-4" title="Partidos Jugados">PJ</th>
-              <th className="p-2 md:p-4 text-emerald-600" title="Partidos Ganados">PG</th>
-              <th className="p-2 md:p-4 text-amber-600" title="Partidos Empatados">PE</th>
-              <th className="p-2 md:p-4 text-red-500" title="Partidos Perdidos">PP</th>
-              <th className="p-2 md:p-4" title="Goles a Favor">GA</th>
-              <th className="p-2 md:p-4" title="Goles en Contra">GC</th>
-              <th className="p-2 md:p-4" title="Diferencia de Goles">DG</th>
-              <th className="p-2 md:p-4 text-yellow-600" title="Tarjetas Amarillas">🟨</th>
-              <th className="p-2 md:p-4 text-red-600" title="Tarjetas Rojas">🟥</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 text-[10px] md:text-sm">
-            {datos.map((club, index) => (
-              <tr key={club.nombre} className={`hover:bg-blue-50/50 transition-colors ${index === 0 ? 'bg-amber-50/10' : 'bg-white'}`}>
-                <td className="p-2 md:p-4 font-bold text-slate-400 text-center">{index + 1}</td>
-                
-                <td className="p-2 md:p-4 font-bold text-slate-800 text-left sticky left-0 bg-white z-10 flex items-center gap-2 md:gap-3 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
-                  {club.logoUrl ? (
-                    <img src={club.logoUrl} alt="Logo" className="w-6 h-6 md:w-10 md:h-10 object-contain rounded-full bg-slate-50 p-0.5 border shrink-0" />
-                  ) : (
-                    <div className="w-6 h-6 md:w-10 md:h-10 bg-slate-100 rounded-full flex items-center justify-center text-[8px] md:text-xs shrink-0 border border-slate-200 shadow-sm">🛡️</div>
-                  )}
-                  
-                  <div className="flex flex-col">
-                    <span className="truncate max-w-[120px] md:max-w-[200px] leading-tight">{club.nombre}</span>
-                    <div className="flex gap-1 md:gap-2 mt-0.5">
-                      {club.instagram && (
-                        <a href={club.instagram} target="_blank" rel="noopener noreferrer" className="text-[8px] md:text-[10px] bg-pink-50 text-pink-600 px-1.5 md:px-2 py-0.5 rounded transition">
-                          IG
-                        </a>
-                      )}
-                      {club.facebook && (
-                        <a href={club.facebook} target="_blank" rel="noopener noreferrer" className="text-[8px] md:text-[10px] bg-blue-50 text-blue-600 px-1.5 md:px-2 py-0.5 rounded transition">
-                          FB
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                </td>
-
-                <td className="p-2 md:p-4 font-black text-sm md:text-lg text-[#1e3a8a] bg-blue-50/30">{club.pts}</td>
-                <td className="p-2 md:p-4 font-bold text-slate-600">{club.pj}</td>
-                <td className="p-2 md:p-4 font-bold text-emerald-600">{club.pg}</td>
-                <td className="p-2 md:p-4 font-bold text-amber-600">{club.pe}</td>
-                <td className="p-2 md:p-4 font-bold text-red-500">{club.pp}</td>
-                <td className="p-2 md:p-4 text-slate-500">{club.ga}</td>
-                <td className="p-2 md:p-4 text-slate-500">{club.gc}</td>
-                <td className={`p-2 md:p-4 font-bold ${club.dg > 0 ? 'text-green-600' : club.dg < 0 ? 'text-red-500' : 'text-slate-500'}`}>
-                  {club.dg > 0 ? `+${club.dg}` : club.dg}
-                </td>
-                <td className="p-2 md:p-4 text-yellow-700 font-bold bg-yellow-50/20">{club.amarillas}</td>
-                <td className="p-2 md:p-4 text-red-700 font-bold bg-red-50/20">{club.rojas}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </div>
-  );
+  if (cargando) return <div className="p-20 text-center font-bold text-[#1e3a8a] animate-pulse">Cargando estadísticas oficiales...</div>;
 
   return (
-    <div className="max-w-7xl mx-auto space-y-4 md:space-y-8 p-2">
+    <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in duration-500 pb-12">
       
-      {/* Banner Principal con Logo, Redes y Auspiciador */}
-      <div className="bg-[#1e3a8a] rounded-3xl p-5 md:p-10 text-white relative overflow-hidden shadow-2xl">
-        <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 md:gap-6">
-          
-          <div className="flex items-center gap-4 md:gap-6 w-full md:w-auto">
-            {infoAsociacion?.logoUrl ? (
-              <img src={infoAsociacion.logoUrl} alt="Logo" className="w-16 h-16 md:w-32 md:h-32 object-contain bg-white rounded-full p-1.5 md:p-2 shadow-lg shrink-0" />
-            ) : (
-              <div className="w-16 h-16 md:w-32 md:h-32 bg-white/10 rounded-full flex items-center justify-center text-3xl md:text-4xl shadow-lg shrink-0">⚽</div>
-            )}
-            <div>
-              <h2 className="text-blue-300 font-black uppercase tracking-[0.2em] text-[9px] md:text-xs mb-1">Asociación Oficial</h2>
-              <h1 className="text-xl md:text-5xl font-black tracking-tighter italic leading-tight">
-                {infoAsociacion?.nombre || "FUTBIAN.PRO"}
-              </h1>
-              <div className="flex flex-wrap gap-2 mt-2 md:mt-4">
-                {infoAsociacion?.instagram && (
-                  <a href={infoAsociacion.instagram} target="_blank" className="bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-[9px] md:text-xs font-bold backdrop-blur-sm border border-white/10">
-                    <span className="text-xs md:text-lg">📸</span> Instagram
-                  </a>
-                )}
-                {infoAsociacion?.facebook && (
-                  <a href={infoAsociacion.facebook} target="_blank" className="bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-[9px] md:text-xs font-bold backdrop-blur-sm border border-white/10">
-                    <span className="text-xs md:text-lg">📘</span> Facebook
-                  </a>
-                )}
-              </div>
+      {/* BANNER PRINCIPAL (Alimentado desde el Panel de Reglas) */}
+      <header className="bg-slate-900 rounded-3xl p-8 md:p-12 shadow-xl text-white relative overflow-hidden flex flex-col items-center text-center border-b-4 border-emerald-500">
+        <div className="relative z-10 space-y-4">
+          {infoAsoc.logoUrl && <img src={infoAsoc.logoUrl} alt="Logo" className="w-24 h-24 mx-auto object-contain bg-white/10 p-2 rounded-full backdrop-blur-sm" />}
+          <h1 className="text-3xl md:text-5xl font-black tracking-tighter uppercase">{infoAsoc.nombre || "Asociación de Fútbol"}</h1>
+          <div className="inline-flex flex-col md:flex-row items-center gap-3 bg-white/10 px-6 py-3 rounded-2xl border border-white/20 backdrop-blur-sm mt-4">
+            <span className="text-xs font-black text-emerald-400 uppercase tracking-widest">Torneo Oficial 2026 Auspiciado por</span>
+            <div className="flex items-center gap-2">
+              {infoAsoc.auspiciadorLogo && <img src={infoAsoc.auspiciadorLogo} alt="Sponsor" className="h-6 object-contain" />}
+              <span className="font-bold text-white uppercase">{infoAsoc.auspiciadorNombre || "Auspiciador"}</span>
             </div>
           </div>
-
-          {/* SECCIÓN DE AUSPICIADOR */}
-          {(infoAsociacion?.auspiciadorNombre || infoAsociacion?.auspiciadorLogo) ? (
-            <div className="w-full md:w-auto mt-2 md:mt-0 flex flex-col items-center md:items-end bg-white/10 p-3 md:p-5 rounded-2xl backdrop-blur-md border border-white/20 shadow-inner">
-              <span className="text-[8px] md:text-[10px] text-blue-200 font-black uppercase tracking-[0.2em] mb-1 md:mb-2 text-center md:text-right">
-                Campeonato Auspiciado Por
-              </span>
-              <div className="flex items-center justify-center md:justify-end gap-3">
-                {infoAsociacion?.auspiciadorLogo && (
-                  <img src={infoAsociacion.auspiciadorLogo} alt="Sponsor" className="h-8 md:h-14 object-contain drop-shadow-md bg-white/80 rounded p-1" />
-                )}
-                {infoAsociacion?.auspiciadorNombre && (
-                  <span className="text-base md:text-2xl font-black italic tracking-tight">{infoAsociacion.auspiciadorNombre}</span>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="hidden lg:block text-[120px] opacity-10 transform rotate-12 scale-150 translate-x-4">⚽</div>
-          )}
-
         </div>
-      </div>
+        <div className="absolute right-[-20px] top-[-40px] opacity-10 text-[200px] pointer-events-none">⚽</div>
+      </header>
 
-      {/* Tabs y Tablas */}
-      <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-        {["general", "series", "goleadores"].map((v) => (
-          <button 
-            key={v}
-            onClick={() => setVistaActiva(v as any)}
-            className={`shrink-0 px-4 md:px-6 py-2.5 md:py-3 rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest transition-all ${vistaActiva === v ? "bg-[#1e3a8a] text-white shadow-xl scale-105" : "bg-white text-slate-400 border border-slate-200"}`}
-          >
-            {v === 'general' ? '🏆 General' : v === 'series' ? '📊 Por Series' : '⚽ Goleadores'}
-          </button>
-        ))}
-      </div>
+      {/* 🔴 REGLA 1: TABLA GENERAL RESTRINGIDA SOLO PARA ADMIN Y DELEGADOS */}
+      {(rolUsuario === 'admin' || rolUsuario === 'delegado') && tablaGeneral.length > 0 && (
+        <section className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-emerald-200">
+          <div className="flex items-center justify-between mb-6 border-b pb-4 border-slate-100">
+            <div>
+              <h2 className="text-xl md:text-2xl font-black text-emerald-700 tracking-tight flex items-center gap-2"><span className="text-3xl">🏆</span> TABLA GENERAL DE CLUBES</h2>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Acumulado de todas las series</p>
+            </div>
+            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-3 py-1 rounded uppercase shadow-sm">Uso Interno Directiva</span>
+          </div>
+          
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full text-left border-collapse min-w-[600px]">
+              <thead>
+                <tr className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-widest border-b border-slate-200">
+                  <th className="p-4 font-black w-10 text-center">#</th>
+                  <th className="p-4 font-bold">Club</th>
+                  <th className="p-4 font-bold text-center">PJ</th>
+                  <th className="p-4 font-bold text-center">PG</th>
+                  <th className="p-4 font-bold text-center">PE</th>
+                  <th className="p-4 font-bold text-center">PP</th>
+                  <th className="p-4 font-black text-center text-[#1e3a8a] text-sm">PTS</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {tablaGeneral.map((stat, i) => (
+                  <tr key={`gen-${stat.club}`} className={`hover:bg-slate-50 transition-colors ${i === 0 ? 'bg-amber-50/50' : ''}`}>
+                    <td className="p-4 text-center font-black text-slate-400">{i + 1}</td>
+                    <td className="p-4 font-black text-slate-800 uppercase text-sm md:text-base">{stat.club} {i === 0 && '👑'}</td>
+                    <td className="p-4 text-center font-bold text-slate-500">{stat.PJ}</td>
+                    <td className="p-4 text-center font-bold text-emerald-600">{stat.PG}</td>
+                    <td className="p-4 text-center font-bold text-slate-400">{stat.PE}</td>
+                    <td className="p-4 text-center font-bold text-red-400">{stat.PP}</td>
+                    <td className="p-4 text-center font-black text-xl text-[#1e3a8a]">{stat.PTS}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
-      <div className="bg-white rounded-2xl md:rounded-3xl border border-slate-200 shadow-xl overflow-hidden min-h-[400px]">
-        {cargando ? (
-          <div className="p-20 flex justify-center"><div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div></div>
+      {/* 🔴 REGLA 2 Y 3: TABLA POR SERIES (PÚBLICA, SIN TARJETAS) */}
+      <section className="space-y-8">
+        <div className="text-center">
+          <h2 className="text-2xl md:text-3xl font-black text-slate-800 tracking-tight">POSICIONES POR SERIE</h2>
+          <p className="text-sm font-bold text-slate-500 mt-2">Estadísticas oficiales actualizadas en tiempo real.</p>
+        </div>
+
+        {Object.keys(tablaPorSerie).length === 0 ? (
+          <div className="bg-white p-12 text-center border-2 border-dashed border-slate-200 rounded-3xl text-slate-400 font-bold">
+            Aún no hay partidos finalizados para calcular las tablas.
+          </div>
         ) : (
-          <>
-            {vistaActiva === "general" && renderTabla(tablaGeneral)}
-            
-            {vistaActiva === "series" && (
-              <>
-                <div className="p-3 md:p-4 bg-slate-50 border-b flex items-center gap-3">
-                  <span className="text-[10px] md:text-xs font-black text-slate-400">FILTRAR SERIE:</span>
-                  <select value={serieSeleccionada} onChange={e => setSerieSeleccionada(e.target.value)} className="bg-white border rounded-lg p-1.5 md:p-2 font-bold text-xs md:text-sm outline-none">
-                    {seriesDisponibles.map(s => <option key={s} value={s}>{s}</option>)}
-                    {seriesDisponibles.length === 0 && <option value="">Sin series creadas</option>}
-                  </select>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+            {Object.entries(tablaPorSerie).sort().map(([serie, stats]) => (
+              <div key={serie} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="bg-[#1e3a8a] p-4 text-white">
+                  <h3 className="font-black text-lg tracking-widest uppercase">SERIE {serie}</h3>
                 </div>
-                {renderTabla(tablaSerie)}
-              </>
-            )}
-
-            {vistaActiva === "goleadores" && (
-              <div className="w-full overflow-x-auto pb-2">
-                {listaGoleadores.length === 0 ? (
-                  <div className="p-12 text-center text-slate-500 font-medium">Aún no hay goles registrados en actas cerradas.</div>
-                ) : (
-                  <table className="w-full min-w-[400px] md:min-w-[500px] text-left border-collapse whitespace-nowrap">
+                
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse min-w-[500px]">
                     <thead>
-                      <tr className="bg-slate-50 text-slate-500 text-[9px] md:text-xs uppercase tracking-wider">
-                        <th className="p-2 md:p-4 font-bold border-b w-10 text-center">Top</th>
-                        <th className="p-2 md:p-4 font-bold border-b">Jugador</th>
-                        <th className="p-2 md:p-4 font-bold border-b">Club</th>
-                        <th className="p-2 md:p-4 font-black text-[#1e3a8a] border-b text-center">Goles</th>
+                      <tr className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-widest border-b border-slate-200">
+                        <th className="p-3 font-black text-center w-8">#</th>
+                        <th className="p-3 font-bold">Club</th>
+                        <th className="p-3 font-bold text-center" title="Partidos Jugados">PJ</th>
+                        <th className="p-3 font-bold text-center" title="Partidos Ganados">PG</th>
+                        <th className="p-3 font-bold text-center" title="Partidos Empatados">PE</th>
+                        <th className="p-3 font-bold text-center" title="Partidos Perdidos">PP</th>
+                        <th className="p-3 font-bold text-center hidden sm:table-cell" title="Goles a Favor">GF</th>
+                        <th className="p-3 font-bold text-center hidden sm:table-cell" title="Goles en Contra">GC</th>
+                        <th className="p-3 font-bold text-center" title="Diferencia de Goles">DIF</th>
+                        <th className="p-3 font-black text-center text-[#1e3a8a]">PTS</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 text-[10px] md:text-sm">
-                      {listaGoleadores.map((g, idx) => (
-                        <tr key={g.rut} className="hover:bg-blue-50 transition-colors">
-                          <td className="p-2 md:p-4 font-black text-slate-400 text-center text-base md:text-xl">
-                            {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : <span className="text-xs md:text-sm">{idx + 1}</span>}
-                          </td>
-                          <td className="p-2 md:p-4 font-bold text-slate-800 uppercase flex items-center gap-2 md:gap-3">
-                            <div className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-slate-100 flex items-center justify-center font-black text-slate-400 shrink-0 text-[10px] md:text-base">
-                              {g.nombre.charAt(0)}
-                            </div>
-                            <div>
-                              {g.nombre} <br/> <span className="text-[8px] md:text-[10px] text-slate-400 font-normal">{g.rut}</span>
-                            </div>
-                          </td>
-                          <td className="p-2 md:p-4 font-medium text-slate-600">
-                             <div className="flex items-center gap-1.5 md:gap-2">
-                               {clubesInfo[g.equipo]?.logoUrl && (
-                                 <img src={clubesInfo[g.equipo].logoUrl} alt="" className="w-4 h-4 md:w-5 md:h-5 rounded-full object-contain bg-white border border-slate-200" />
-                               )}
-                               <span className="truncate max-w-[100px] md:max-w-none">{g.equipo}</span>
-                             </div>
-                          </td>
-                          <td className="p-2 md:p-4 font-black text-base md:text-xl text-[#1e3a8a] text-center bg-blue-50/30">{g.goles}</td>
+                    <tbody className="divide-y divide-slate-100">
+                      {stats.map((stat, i) => (
+                        <tr key={`${serie}-${stat.club}`} className={`hover:bg-slate-50 transition-colors ${i < 4 ? 'bg-blue-50/30' : ''}`}>
+                          <td className="p-3 text-center font-black text-slate-400">{i + 1}</td>
+                          <td className="p-3 font-black text-slate-800 uppercase text-xs truncate max-w-[120px]">{stat.club}</td>
+                          <td className="p-3 text-center font-bold text-slate-600">{stat.PJ}</td>
+                          <td className="p-3 text-center font-bold text-emerald-600">{stat.PG}</td>
+                          <td className="p-3 text-center font-bold text-slate-400">{stat.PE}</td>
+                          <td className="p-3 text-center font-bold text-red-400">{stat.PP}</td>
+                          <td className="p-3 text-center font-bold text-slate-500 hidden sm:table-cell">{stat.GF}</td>
+                          <td className="p-3 text-center font-bold text-slate-500 hidden sm:table-cell">{stat.GC}</td>
+                          <td className="p-3 text-center font-bold text-slate-600">{stat.DG > 0 ? `+${stat.DG}` : stat.DG}</td>
+                          <td className="p-3 text-center font-black text-lg text-[#1e3a8a]">{stat.PTS}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
-                )}
+                </div>
+                <div className="bg-slate-50 p-2 text-center border-t border-slate-100">
+                  <p className="text-[9px] font-bold text-slate-400 uppercase">Clasifican los 4 primeros a la Liguilla</p>
+                </div>
               </div>
-            )}
-          </>
+            ))}
+          </div>
         )}
-      </div>
+      </section>
+
     </div>
   );
 }
