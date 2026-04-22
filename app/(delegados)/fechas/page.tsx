@@ -10,7 +10,7 @@ interface Partido {
 }
 
 export default function VerFechasClub() {
-  const { club: miClub, cargando: authCargando } = useAuth();
+  const { club: miClub, cargando: authCargando } = useAuth() as any;
   const [cargandoDatos, setCargandoDatos] = useState(true);
   const [partidos, setPartidos] = useState<Partido[]>([]);
   const [filtroFecha, setFiltroFecha] = useState<string>("Todas");
@@ -18,11 +18,12 @@ export default function VerFechasClub() {
   useEffect(() => {
     if (authCargando) return;
     
-    // 🚨 ARREGLO FIREBASE: Quitamos orderBy("hora")
     const unsubP = onSnapshot(query(collection(db, "asociaciones/san_fabian/partidos"), orderBy("fechaNumero", "desc")), (snap) => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Partido[];
-      // Ordenamos la hora con JS
-      data.sort((a, b) => b.fechaNumero - a.fechaNumero || a.hora.localeCompare(b.hora));
+      
+      // 🚨 ARREGLO DE ERROR: (a.hora || "") protege el código si algún partido no tiene hora
+      data.sort((a, b) => b.fechaNumero - a.fechaNumero || (a.hora || "").localeCompare(b.hora || ""));
+      
       setPartidos(data);
       setCargandoDatos(false);
     });
@@ -62,7 +63,7 @@ export default function VerFechasClub() {
                 <div className="p-4 md:p-6 flex flex-col md:flex-row items-center gap-6">
                   <div className="flex flex-row md:flex-col items-center justify-center gap-2 md:gap-0 w-full md:w-32 shrink-0 border-b md:border-b-0 md:border-r border-slate-100 pb-3 md:pb-0">
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">FECHA {p.fechaNumero}</span>
-                    <span className="text-xl md:text-2xl font-black text-[#1e3a8a]">{p.hora}</span>
+                    <span className="text-xl md:text-2xl font-black text-[#1e3a8a]">{p.hora || "Por definir"}</span>
                     <span className="text-[10px] font-bold text-slate-500 md:mt-1">{p.dia}</span>
                   </div>
                   <div className="flex-1 w-full text-center">
