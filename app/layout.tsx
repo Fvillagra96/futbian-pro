@@ -25,8 +25,7 @@ function EnrutadorHermetico({ children }: { children: React.ReactNode }) {
 
   const esRutaPublica = pathname === '/' || pathname === '/login' || pathname.startsWith('/sanciones') || pathname.startsWith('/liguilla');
   const esRutaAdmin = pathname.startsWith('/admin');
-  const esRutaDelegado = pathname.startsWith('/gestion') || pathname.startsWith('/fechas') || pathname.startsWith('/historial') || pathname.startsWith('/multas') || pathname.startsWith('/jugadores');
-
+ const esRutaDelegado = pathname.startsWith('/gestion') || pathname.startsWith('/fechas') || pathname.startsWith('/historial') || pathname.startsWith('/multas') || pathname.startsWith('/jugadores') || pathname.startsWith('/clasificacion');
   if (cargando) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-slate-50">
@@ -90,6 +89,7 @@ function EnrutadorHermetico({ children }: { children: React.ReactNode }) {
                   <Link href="/liguilla" className="hover:bg-blue-800 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition tracking-wider">Liguilla</Link>
                   <Link href="/sanciones" className="hover:bg-blue-800 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition tracking-wider">Sancionados</Link>
                   <Link href="/multas" className="hover:bg-blue-800 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition tracking-wider">Mi Cartola</Link>
+                  <Link href="/clasificacion" className="hover:bg-blue-800 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition tracking-wider">Liguilla (Clasif)</Link>
                 </>
               )}
 

@@ -17,8 +17,12 @@ export default function VerFechasClub() {
 
   useEffect(() => {
     if (authCargando) return;
-    const unsubP = onSnapshot(query(collection(db, "asociaciones/san_fabian/partidos"), orderBy("fechaNumero", "desc"), orderBy("hora")), (snap) => {
-      setPartidos(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Partido[]);
+    // Quitamos el segundo orderBy para evitar el error de Índices de Firebase
+    const unsubP = onSnapshot(query(collection(db, "asociaciones/san_fabian/partidos"), orderBy("fechaNumero", "desc")), (snap) => {
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Partido[];
+      // Ordenamos la hora aquí en Javascript
+      data.sort((a, b) => b.fechaNumero - a.fechaNumero || a.hora.localeCompare(b.hora));
+      setPartidos(data);
       setCargandoDatos(false);
     });
     return () => unsubP();
