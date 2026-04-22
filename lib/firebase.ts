@@ -4,7 +4,7 @@ import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage"; // <-- ¡Nuevo módulo para fotos!
 
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: "AIzaSyA-Lv5Gy37JPDm5rwZR1KX89OXdOBvPZgo",
   authDomain: "futbian.firebaseapp.com",
   projectId: "futbian",
