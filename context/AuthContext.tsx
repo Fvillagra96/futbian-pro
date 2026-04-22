@@ -4,7 +4,6 @@ import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 
-// Definimos qué información tendrá nuestra "Credencial" global
 interface AuthContextType {
   usuario: User | null;
   rol: 'admin' | 'delegado' | null;
