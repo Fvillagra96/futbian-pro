@@ -110,6 +110,7 @@ function EnrutadorHermetico({ children }: { children: React.ReactNode }) {
                   <Link href="/admin/sanciones" className="hover:bg-blue-800 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition tracking-wider">Castigos</Link>
                   <Link href="/admin/multas" className="hover:bg-blue-800 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition tracking-wider">Tesorería</Link>
                   <Link href="/admin/reglas" className="hover:bg-blue-800 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition tracking-wider">Ajustes</Link>
+                  <Link href="/admin/usuarios" className="hover:bg-blue-800 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition tracking-wider">Usuarios</Link> 
                 </>
               )}
             </div>
