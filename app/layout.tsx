@@ -10,25 +10,23 @@ import { AuthProvider, useAuth } from "@/context/AuthContext";
 
 const inter = Inter({ subsets: ["latin"] });
 
-// 1. EL ENRUTADOR HERMÉTICO (El Guardia de Seguridad)
 function EnrutadorHermetico({ children }: { children: React.ReactNode }) {
   const { usuario, rol, club, cargando } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
   const [menuAbierto, setMenuAbierto] = useState(false);
 
-  // Cierra el menú al cambiar de página
   useEffect(() => setMenuAbierto(false), [pathname]);
 
-  // SISTEMA DE SEGURIDAD HERMÉTICO (Protección de Rutas)
-  const rolNormalizado = rol?.toLowerCase().trim(); // Convertimos a minúsculas por si acaso en la BD dice "Delegado"
+  // SISTEMA DE SEGURIDAD HERMÉTICO
+  const rolNormalizado = rol?.toLowerCase().trim();
 
- // Quitamos '/sanciones' de la ruta pública
+  // NOTA: Sanciones ya no es pública. Liguilla sí.
   const esRutaPublica = pathname === '/' || pathname === '/login' || pathname.startsWith('/liguilla');
-  
-  // Agregamos '/sanciones' a la ruta de delegados (y nos aseguramos que esté clasificacion)
-  const esRutaDelegado = pathname.startsWith('/gestion') || pathname.startsWith('/fechas') || pathname.startsWith('/historial') || pathname.startsWith('/multas') || pathname.startsWith('/jugadores') || pathname.startsWith('/clasificacion') || pathname.startsWith('/sanciones');
   const esRutaAdmin = pathname.startsWith('/admin');
+  
+  // 🚨 AQUÍ AGREGAMOS EL PERMISO PARA '/clasificacion' y '/sanciones'
+  const esRutaDelegado = pathname.startsWith('/gestion') || pathname.startsWith('/fechas') || pathname.startsWith('/historial') || pathname.startsWith('/multas') || pathname.startsWith('/jugadores') || pathname.startsWith('/clasificacion') || pathname.startsWith('/sanciones');
 
   if (cargando) {
     return (
@@ -41,7 +39,6 @@ function EnrutadorHermetico({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Si intenta entrar a una zona privada sin sesión, lo bloqueamos
   if (!usuario && !esRutaPublica) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 p-4">
@@ -55,7 +52,6 @@ function EnrutadorHermetico({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Si no es admin y quiere entrar a zona admin, o si quiere entrar a delegados y no es nada
   if ((esRutaAdmin && rolNormalizado !== 'admin') || (esRutaDelegado && rolNormalizado !== 'admin' && rolNormalizado !== 'delegado')) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 p-4">
@@ -90,10 +86,13 @@ function EnrutadorHermetico({ children }: { children: React.ReactNode }) {
                   <Link href="/fechas" className="hover:bg-blue-800 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition tracking-wider">Fixture</Link>
                   <Link href="/gestion/actas" className="bg-emerald-600 hover:bg-emerald-500 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition shadow-sm ml-1">Mesa Turno</Link>
                   <Link href="/historial" className="hover:bg-blue-800 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition tracking-wider">Mis Actas</Link>
+                  
+                  {/* BOTÓN CLASIFICACIÓN DELEGADO */}
+                  <Link href="/clasificacion" className="text-yellow-400 hover:bg-blue-800 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition tracking-wider">Clasificación</Link>
+                  
                   <Link href="/liguilla" className="hover:bg-blue-800 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition tracking-wider">Liguilla</Link>
                   <Link href="/sanciones" className="hover:bg-blue-800 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition tracking-wider">Sancionados</Link>
                   <Link href="/multas" className="hover:bg-blue-800 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition tracking-wider">Mi Cartola</Link>
-                  <Link href="/clasificacion" className="hover:bg-blue-800 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition tracking-wider">Liguilla (Clasif)</Link>
                 </>
               )}
 
@@ -103,6 +102,10 @@ function EnrutadorHermetico({ children }: { children: React.ReactNode }) {
                   <Link href="/jugadores" className="hover:bg-blue-800 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition tracking-wider">Padrón</Link>
                   <Link href="/admin/programacion" className="bg-blue-700 hover:bg-blue-600 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition shadow-sm ml-1">Programar</Link>
                   <Link href="/admin/actas" className="bg-red-600 hover:bg-red-500 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition shadow-sm ml-1">Tribunal</Link>
+                  
+                  {/* BOTÓN CLASIFICACIÓN ADMIN */}
+                  <Link href="/clasificacion" className="text-yellow-400 hover:bg-blue-800 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition tracking-wider">Padrón Final</Link>
+                  
                   <Link href="/liguilla" className="hover:bg-blue-800 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition tracking-wider">Liguilla</Link>
                   <Link href="/admin/sanciones" className="hover:bg-blue-800 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition tracking-wider">Castigos</Link>
                   <Link href="/admin/multas" className="hover:bg-blue-800 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition tracking-wider">Tesorería</Link>
@@ -153,7 +156,8 @@ function EnrutadorHermetico({ children }: { children: React.ReactNode }) {
                     <Link href="/fechas" className="block px-3 py-2 rounded-md text-sm font-bold hover:bg-blue-800 uppercase tracking-wider">📅 Fixture</Link>
                     <Link href="/gestion/actas" className="block px-3 py-2 rounded-md text-sm font-bold bg-emerald-600 hover:bg-emerald-500 mt-2 uppercase tracking-wider">📝 Mesa de Turno</Link>
                     <Link href="/historial" className="block px-3 py-2 rounded-md text-sm font-bold hover:bg-blue-800 mt-2 uppercase tracking-wider">📖 Mis Actas</Link>
-                    <Link href="/liguilla" className="block px-3 py-2 rounded-md text-sm font-bold hover:bg-blue-800 uppercase tracking-wider">🏆 Liguilla</Link>
+                    <Link href="/clasificacion" className="block px-3 py-2 rounded-md text-sm font-bold text-yellow-400 hover:bg-blue-800 uppercase tracking-wider">⭐ Clasificación Liguilla</Link>
+                    <Link href="/liguilla" className="block px-3 py-2 rounded-md text-sm font-bold hover:bg-blue-800 uppercase tracking-wider">🏆 Liguilla (Llaves)</Link>
                     <Link href="/sanciones" className="block px-3 py-2 rounded-md text-sm font-bold hover:bg-blue-800 uppercase tracking-wider">⚠️ Sancionados</Link>
                     <Link href="/multas" className="block px-3 py-2 rounded-md text-sm font-bold hover:bg-blue-800 uppercase tracking-wider">💰 Mi Cartola</Link>
                   </>
@@ -165,7 +169,8 @@ function EnrutadorHermetico({ children }: { children: React.ReactNode }) {
                     <Link href="/jugadores" className="block px-3 py-2 rounded-md text-sm font-bold hover:bg-blue-800 uppercase tracking-wider">⚽ Padrón General</Link>
                     <Link href="/admin/programacion" className="block px-3 py-2 rounded-md text-sm font-bold bg-blue-700 mt-2 uppercase tracking-wider">📅 Programar</Link>
                     <Link href="/admin/actas" className="block px-3 py-2 rounded-md text-sm font-bold bg-red-600 mt-2 uppercase tracking-wider">⚖️ Tribunal</Link>
-                    <Link href="/liguilla" className="block px-3 py-2 rounded-md text-sm font-bold hover:bg-blue-800 mt-2 uppercase tracking-wider">🏆 Liguilla</Link>
+                    <Link href="/clasificacion" className="block px-3 py-2 rounded-md text-sm font-bold text-yellow-400 hover:bg-blue-800 uppercase tracking-wider">⭐ Padrón Final</Link>
+                    <Link href="/liguilla" className="block px-3 py-2 rounded-md text-sm font-bold hover:bg-blue-800 mt-2 uppercase tracking-wider">🏆 Liguilla (Llaves)</Link>
                     <Link href="/admin/sanciones" className="block px-3 py-2 rounded-md text-sm font-bold hover:bg-blue-800 uppercase tracking-wider">⚠️ Castigos Globales</Link>
                     <Link href="/admin/multas" className="block px-3 py-2 rounded-md text-sm font-bold hover:bg-blue-800 uppercase tracking-wider">💰 Tesorería</Link>
                     <Link href="/admin/reglas" className="block px-3 py-2 rounded-md text-sm font-bold hover:bg-blue-800 uppercase tracking-wider">⚙️ Reglas Torneo</Link>
@@ -188,7 +193,6 @@ function EnrutadorHermetico({ children }: { children: React.ReactNode }) {
   );
 }
 
-// 2. EL LAYOUT MAESTRO (Inyecta el AuthProvider y tus Meta Tags Móviles)
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es">
@@ -203,7 +207,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
       </head>
       <body className={`${inter.className} min-h-screen flex flex-col bg-slate-50 relative`}>
-        {/* Aquí envolvemos todo con el motor de seguridad que creamos antes */}
         <AuthProvider>
           <EnrutadorHermetico>
             {children}
