@@ -23,9 +23,13 @@ function EnrutadorHermetico({ children }: { children: React.ReactNode }) {
   // SISTEMA DE SEGURIDAD HERMÉTICO (Protección de Rutas)
   const rolNormalizado = rol?.toLowerCase().trim(); // Convertimos a minúsculas por si acaso en la BD dice "Delegado"
 
-  const esRutaPublica = pathname === '/' || pathname === '/login' || pathname.startsWith('/sanciones') || pathname.startsWith('/liguilla');
+ // Quitamos '/sanciones' de la ruta pública
+  const esRutaPublica = pathname === '/' || pathname === '/login' || pathname.startsWith('/liguilla');
+  
+  // Agregamos '/sanciones' a la ruta de delegados (y nos aseguramos que esté clasificacion)
+  const esRutaDelegado = pathname.startsWith('/gestion') || pathname.startsWith('/fechas') || pathname.startsWith('/historial') || pathname.startsWith('/multas') || pathname.startsWith('/jugadores') || pathname.startsWith('/clasificacion') || pathname.startsWith('/sanciones');
   const esRutaAdmin = pathname.startsWith('/admin');
- const esRutaDelegado = pathname.startsWith('/gestion') || pathname.startsWith('/fechas') || pathname.startsWith('/historial') || pathname.startsWith('/multas') || pathname.startsWith('/jugadores') || pathname.startsWith('/clasificacion');
+
   if (cargando) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-slate-50">
