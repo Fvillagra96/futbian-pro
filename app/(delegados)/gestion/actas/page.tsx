@@ -1,8 +1,8 @@
 'use client'
 import { useState, useEffect } from "react";
-import { db, auth } from "@/lib/firebase";
-import { collection, onSnapshot, query, orderBy, doc, updateDoc, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
-import { onAuthStateChanged } from "firebase/auth";
+import { db } from "@/lib/firebase";
+import { collection, onSnapshot, query, orderBy, doc, updateDoc, arrayUnion, arrayRemove } from "firebase/firestore";
+import { useAuth } from "@/context/AuthContext";
 
 const formatearRut = (valor: string) => {
   let cuerpo = valor.replace(/[^0-9kK]/g, "").toUpperCase();
@@ -27,9 +27,10 @@ interface Partido {
 }
 
 export default function PaginaActas() {
-  const [rolUsuario, setRolUsuario] = useState<string | null>(null);
-  const [clubUsuario, setClubUsuario] = useState<string>("");
-  const [cargando, setCargando] = useState(true);
+  // AQUÍ ESTÁ LA MAGIA DEL NUEVO CONTEXTO DE SEGURIDAD
+  const { rol: rolUsuario, club: clubUsuario, cargando: authCargando } = useAuth();
+  
+  const [cargandoDatos, setCargandoDatos] = useState(true);
   const [partidos, setPartidos] = useState<Partido[]>([]);
   const [jugadores, setJugadores] = useState<Jugador[]>([]);
   const [partidoSeleccionadoId, setPartidoSeleccionadoId] = useState<string>("");
@@ -40,28 +41,20 @@ export default function PaginaActas() {
   const [pestanaDerecha, setPestanaDerecha] = useState<"eventos" | "nomina">("eventos");
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (user?.email) {
-        const docSnap = await getDoc(doc(db, "asociaciones/san_fabian/usuarios_permisos", user.email));
-        if (docSnap.exists()) {
-          setRolUsuario(docSnap.data().rol);
-          setClubUsuario(docSnap.data().club);
-        }
-      }
-      setCargando(false);
-    });
-    return () => unsub();
-  }, []);
+    // Si el Auth aún está cargando, no hacemos consultas a la base de datos
+    if (authCargando || !rolUsuario) return;
 
-  useEffect(() => {
     const unsubP = onSnapshot(query(collection(db, "asociaciones/san_fabian/partidos"), orderBy("fechaNumero")), (snap) => {
       setPartidos(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Partido[]);
     });
+    
     const unsubJ = onSnapshot(collection(db, "asociaciones/san_fabian/jugadores"), (snap) => {
       setJugadores(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Jugador[]);
+      setCargandoDatos(false);
     });
+    
     return () => { unsubP(); unsubJ(); };
-  }, []);
+  }, [authCargando, rolUsuario]);
 
   const partidoActivo = partidos.find(p => p.id === partidoSeleccionadoId);
   
@@ -69,14 +62,17 @@ export default function PaginaActas() {
     e.preventDefault();
     setErrorBusqueda(""); setJugadorEncontrado(null);
     if (!partidoActivo || !equipoSeleccionado) return;
+    
     const clubABuscar = equipoSeleccionado === "local" ? partidoActivo.local : partidoActivo.visita;
     const rutBuscadoLimpio = idInput.replace(/[^0-9kK]/g, "").toUpperCase();
     const clubABuscarLimpio = clubABuscar.trim().toLowerCase();
+    
     const encontrado = jugadores.find(j => {
       const rutDBLimpio = j.rut.replace(/[^0-9kK]/g, "").toUpperCase();
       const clubDBLimpio = j.club.trim().toLowerCase();
       return rutDBLimpio === rutBuscadoLimpio && clubDBLimpio === clubABuscarLimpio;
     });
+    
     if (encontrado) setJugadorEncontrado(encontrado); 
     else setErrorBusqueda(`ID no encontrado en ${clubABuscar}.`); 
   };
@@ -196,10 +192,10 @@ export default function PaginaActas() {
     } else if (confirmacion !== null) alert("Cancelado.");
   };
 
-  if (cargando) return <div className="p-20 text-center font-bold text-[#1e3a8a]">Cargando Mesa...</div>;
+  if (authCargando || cargandoDatos) return <div className="p-20 text-center font-bold text-[#1e3a8a] animate-pulse">Abriendo Mesa de Turno...</div>;
 
   return (
-    <div className="max-w-7xl mx-auto space-y-4 md:space-y-6 p-2 md:p-4 overflow-x-hidden">
+    <div className="max-w-7xl mx-auto space-y-4 md:space-y-6 p-2 md:p-4 overflow-x-hidden animate-in fade-in duration-500">
       <header className="bg-white rounded-2xl p-4 md:p-6 border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-center gap-4">
         <div className="text-center md:text-left">
           <h2 className="text-[10px] md:text-sm font-bold text-emerald-600 uppercase tracking-widest mb-1">Mesa de Turno</h2>
@@ -207,7 +203,7 @@ export default function PaginaActas() {
         </div>
         <div className="bg-slate-100 px-4 py-2 rounded-xl border border-slate-200 w-full md:w-auto text-center">
            <p className="text-[10px] font-bold text-slate-400 uppercase">Club a Cargo</p>
-           <p className="text-sm font-bold text-slate-700">{clubUsuario || "Admin"}</p>
+           <p className="text-sm font-bold text-slate-700">{clubUsuario || "Directiva General"}</p>
         </div>
       </header>
 
