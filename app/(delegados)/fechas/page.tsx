@@ -17,10 +17,11 @@ export default function VerFechasClub() {
 
   useEffect(() => {
     if (authCargando) return;
-    // Quitamos el segundo orderBy para evitar el error de Índices de Firebase
+    
+    // 🚨 ARREGLO FIREBASE: Quitamos orderBy("hora")
     const unsubP = onSnapshot(query(collection(db, "asociaciones/san_fabian/partidos"), orderBy("fechaNumero", "desc")), (snap) => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Partido[];
-      // Ordenamos la hora aquí en Javascript
+      // Ordenamos la hora con JS
       data.sort((a, b) => b.fechaNumero - a.fechaNumero || a.hora.localeCompare(b.hora));
       setPartidos(data);
       setCargandoDatos(false);

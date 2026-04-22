@@ -8,7 +8,7 @@ interface Club { nombre: string; }
 interface Partido { id: string; fechaNumero: number; local: string; visita: string; serie: string; cancha: string; dia: string; hora: string; estado: string; }
 
 export default function ModuloProgramacion() {
-  const { authCargando } = useAuth() as any;
+  const { cargando: authCargando } = useAuth();
   const [cargandoDatos, setCargandoDatos] = useState(true);
   
   const [clubes, setClubes] = useState<Club[]>([]);
@@ -24,15 +24,22 @@ export default function ModuloProgramacion() {
 
   useEffect(() => {
     if (authCargando) return;
+
     const unsubC = onSnapshot(collection(db, "asociaciones/san_fabian/clubes"), (snap) => {
       const data = snap.docs.map(d => d.data() as Club).sort((a, b) => a.nombre.localeCompare(b.nombre));
       setClubes(data);
       if (data.length > 1) { setLocal(data[0].nombre); setVisita(data[1].nombre); }
     });
-    const unsubP = onSnapshot(query(collection(db, "asociaciones/san_fabian/partidos"), orderBy("fechaNumero", "desc"), orderBy("hora")), (snap) => {
-      setPartidos(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Partido[]);
+
+    // 🚨 ARREGLO FIREBASE: Quitamos orderBy("hora") de aquí
+    const unsubP = onSnapshot(query(collection(db, "asociaciones/san_fabian/partidos"), orderBy("fechaNumero", "desc")), (snap) => {
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Partido[];
+      // Y lo ordenamos por hora usando Javascript
+      data.sort((a, b) => b.fechaNumero - a.fechaNumero || a.hora.localeCompare(b.hora));
+      setPartidos(data);
       setCargandoDatos(false);
     });
+
     return () => { unsubC(); unsubP(); };
   }, [authCargando]);
 
