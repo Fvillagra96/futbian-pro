@@ -37,7 +37,6 @@ export default function PaginaActas() {
   const [jugadorEncontrado, setJugadorEncontrado] = useState<Jugador | null>(null);
   const [pestanaDerecha, setPestanaDerecha] = useState<"eventos" | "nomina">("eventos");
 
-  // 🚨 NUEVOS ESTADOS PARA EL BUSCADOR
   const [busqueda, setBusqueda] = useState("");
   const [mostrarResultados, setMostrarResultados] = useState(false);
 
@@ -58,7 +57,7 @@ export default function PaginaActas() {
 
   const partidoActivo = partidos.find(p => p.id === partidoSeleccionadoId);
   
-  // 🚨 NUEVA LÓGICA DEL BUSCADOR INTELIGENTE (Reemplaza buscarPorId y manejarInputId)
+  // 🚨 BUSCADOR ACTUALIZADO: Sin restricción de serie y oculta a los que ya firmaron
   const jugadoresFiltradosBuscador = useMemo(() => {
     if (!partidoActivo || !equipoSeleccionado || !busqueda.trim()) return [];
     
@@ -66,11 +65,14 @@ export default function PaginaActas() {
     const termino = busqueda.toLowerCase().trim();
 
     return jugadores.filter(j => {
+      // Solo verificamos que sea del club correcto
       const esDelClub = j.club.trim().toLowerCase() === clubABuscar.trim().toLowerCase();
-      const esDeLaSerie = j.serie === partidoActivo.serie;
+      // Que coincida con lo que se escribe (nombre o RUT)
       const coincide = j.nombre.toLowerCase().includes(termino) || j.rut.toLowerCase().includes(termino);
+      // Y que NO esté ya firmado en el acta
+      const yaEstaEnNomina = partidoActivo.nomina?.some(n => n.rut === j.rut);
       
-      return esDelClub && esDeLaSerie && coincide;
+      return esDelClub && coincide && !yaEstaEnNomina;
     }).slice(0, 5); // Mostramos los 5 mejores resultados
   }, [busqueda, partidoActivo, equipoSeleccionado, jugadores]);
 
@@ -240,7 +242,6 @@ export default function PaginaActas() {
 
               {equipoSeleccionado && (
                 <div className="space-y-4">
-                  {/* 🚨 BUSCADOR INTELIGENTE EN LUGAR DEL INPUT ANTIGUO */}
                   <div className="relative">
                     <input 
                       type="text" 
@@ -254,14 +255,15 @@ export default function PaginaActas() {
                     {mostrarResultados && busqueda.trim().length > 0 && (
                       <div className="absolute top-full left-0 w-full mt-2 bg-white border border-slate-200 shadow-xl rounded-xl z-50 overflow-hidden animate-in slide-in-from-top-2">
                         {jugadoresFiltradosBuscador.length === 0 ? (
-                          <div className="p-4 text-center text-xs font-bold text-slate-400">No hay coincidencias.</div>
+                          <div className="p-4 text-center text-xs font-bold text-slate-400">No hay coincidencias (o ya están en nómina).</div>
                         ) : (
                           <ul className="divide-y divide-slate-100">
                             {jugadoresFiltradosBuscador.map(j => (
                               <li key={j.id}>
                                 <button onClick={() => seleccionarJugador(j)} className="w-full text-left px-4 py-3 hover:bg-emerald-50 transition">
                                   <p className="font-black text-slate-800 text-xs uppercase">{j.nombre}</p>
-                                  <p className="font-mono text-[10px] text-slate-400 font-bold">{j.rut}</p>
+                                  {/* Ahora mostramos la serie del jugador en la búsqueda para saber si es un "comodín" */}
+                                  <p className="font-mono text-[10px] text-slate-400 font-bold">{j.rut} • <span className="text-emerald-600">Inscrito en {j.serie}</span></p>
                                 </button>
                               </li>
                             ))}
@@ -271,14 +273,13 @@ export default function PaginaActas() {
                     )}
                   </div>
 
-                  {/* EL PANEL DE ACCIONES DEL JUGADOR SIGUE EXACTAMENTE IGUAL */}
                   {jugadorEncontrado && (
                     <div className="bg-slate-50 p-4 rounded-xl border-2 border-emerald-500 space-y-4 animate-in zoom-in-95 duration-200 shadow-lg relative overflow-hidden">
                       <div className="absolute top-0 left-0 w-2 h-full bg-emerald-500"></div>
                       <div className="flex items-center gap-3 pl-2">
                         <div className="min-w-0 flex-1">
                           <p className="font-black text-slate-800 text-sm md:text-base leading-tight uppercase truncate">{jugadorEncontrado.nombre}</p>
-                          <p className="text-[10px] md:text-xs font-bold text-slate-500">{jugadorEncontrado.rut} • <span className="text-[#1e3a8a]">Serie {jugadorEncontrado.serie}</span></p>
+                          <p className="text-[10px] md:text-xs font-bold text-slate-500">{jugadorEncontrado.rut} • <span className="text-[#1e3a8a]">Inscrito en {jugadorEncontrado.serie}</span></p>
                         </div>
                       </div>
                       <button onClick={agregarANomina} className="w-full bg-[#1e3a8a] hover:bg-blue-800 text-white py-3 rounded-xl font-black text-xs transition shadow-sm flex justify-center items-center gap-2">📋 MARCAR PRESENTE EN NÓMINA</button>
