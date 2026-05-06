@@ -8,7 +8,8 @@ interface AsociacionInfo {
   nombre?: string; logoUrl?: string; auspiciadorNombre?: string; auspiciadorLogo?: string; 
   minPartidosLiguilla?: Record<string, number>;
 }
-interface Club { id: string; nombre: string; logoUrl?: string; instagram?: string; facebook?: string; }
+// 🚨 MEJORA: Agregamos el arreglo de series al modelo del Club
+interface Club { id: string; nombre: string; logoUrl?: string; instagram?: string; facebook?: string; series?: string[]; }
 
 const SERIES_DEFAULT = ["Honor", "Segunda", "Juvenil", "Senior 35", "Senior 40", "Damas"];
 
@@ -20,7 +21,9 @@ export default function PanelControlMaestro() {
   const [guardandoAsoc, setGuardandoAsoc] = useState(false);
   const [clubes, setClubes] = useState<Club[]>([]);
   const [editandoClubId, setEditandoClubId] = useState<string | null>(null);
-  const [clubForm, setClubForm] = useState({ nombre: "", logoUrl: "", instagram: "", facebook: "" });
+  
+  // 🚨 MEJORA: El estado inicial ahora incluye un arreglo vacío para las series
+  const [clubForm, setClubForm] = useState<{nombre: string, logoUrl: string, instagram: string, facebook: string, series: string[]}>({ nombre: "", logoUrl: "", instagram: "", facebook: "", series: [] });
 
   useEffect(() => {
     if (authCargando) return;
@@ -55,6 +58,17 @@ export default function PanelControlMaestro() {
     }));
   };
 
+  // 🚨 NUEVO: Función para alternar la selección de una serie
+  const toggleSerie = (serieSeleccionada: string) => {
+    setClubForm(prev => {
+      if (prev.series.includes(serieSeleccionada)) {
+        return { ...prev, series: prev.series.filter(s => s !== serieSeleccionada) };
+      } else {
+        return { ...prev, series: [...prev.series, serieSeleccionada] };
+      }
+    });
+  };
+
   const guardarClub = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!clubForm.nombre.trim()) return;
@@ -65,19 +79,23 @@ export default function PanelControlMaestro() {
       } else {
         if (clubes.some(c => c.nombre.toLowerCase() === clubForm.nombre.toLowerCase())) return alert("Ya existe un club con este nombre.");
         
-        // 🚨 AQUÍ ESTÁ LA MEJORA: Formateamos el nombre para que sea el ID de la base de datos
         const idClubFormateado = clubForm.nombre.trim().replace(/\s+/g, '_').toLowerCase();
-        
-        // Usamos setDoc en lugar de addDoc para forzar el ID
         await setDoc(doc(db, "asociaciones/san_fabian/clubes", idClubFormateado), clubForm);
       }
-      setClubForm({ nombre: "", logoUrl: "", instagram: "", facebook: "" });
+      setClubForm({ nombre: "", logoUrl: "", instagram: "", facebook: "", series: [] });
     } catch (error) { console.error(error); }
   };
 
   const prepararEdicionClub = (club: Club) => {
     setEditandoClubId(club.id);
-    setClubForm({ nombre: club.nombre, logoUrl: club.logoUrl || "", instagram: club.instagram || "", facebook: club.facebook || "" });
+    // 🚨 MEJORA: Cargamos las series previas al editar (o un array vacío si es un club viejo)
+    setClubForm({ 
+      nombre: club.nombre, 
+      logoUrl: club.logoUrl || "", 
+      instagram: club.instagram || "", 
+      facebook: club.facebook || "",
+      series: club.series || []
+    });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -144,13 +162,30 @@ export default function PanelControlMaestro() {
             <div className="space-y-3">
               <input type="text" placeholder="Nombre Oficial" value={clubForm.nombre} onChange={e => setClubForm({...clubForm, nombre: e.target.value})} className="w-full p-2.5 bg-white border border-slate-300 rounded-lg font-bold text-sm outline-none" required disabled={!!editandoClubId} />
               <input type="url" placeholder="Link Escudo" value={clubForm.logoUrl} onChange={e => setClubForm({...clubForm, logoUrl: e.target.value})} className="w-full p-2.5 bg-white border border-slate-300 rounded-lg text-xs outline-none" />
+              
+              {/* 🚨 NUEVO MÓDULO: Selección de Series */}
+              <div className="bg-white p-3 rounded-lg border border-slate-200">
+                <label className="block text-[10px] font-black text-slate-400 uppercase mb-2">Series del Club</label>
+                <div className="flex flex-wrap gap-2">
+                  {SERIES_DEFAULT.map(serie => (
+                    <label key={serie} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold cursor-pointer transition-colors border ${clubForm.series.includes(serie) ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'}`}>
+                      <input type="checkbox" checked={clubForm.series.includes(serie)} onChange={() => toggleSerie(serie)} className="hidden" />
+                      <span className={`w-3 h-3 rounded-sm flex items-center justify-center border ${clubForm.series.includes(serie) ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300'}`}>
+                        {clubForm.series.includes(serie) && '✓'}
+                      </span>
+                      {serie}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
               <div className="flex gap-2">
                 <input type="url" placeholder="Facebook URL" value={clubForm.facebook} onChange={e => setClubForm({...clubForm, facebook: e.target.value})} className="flex-1 p-2 bg-white border border-slate-300 rounded-lg text-xs outline-none" />
                 <input type="url" placeholder="Instagram URL" value={clubForm.instagram} onChange={e => setClubForm({...clubForm, instagram: e.target.value})} className="flex-1 p-2 bg-white border border-slate-300 rounded-lg text-xs outline-none" />
               </div>
               <div className="flex gap-2 pt-2">
                 <button type="submit" className="flex-1 bg-[#1e3a8a] text-white py-2 rounded-lg font-bold text-xs hover:bg-blue-800 transition shadow-sm">{editandoClubId ? "Guardar Cambios" : "Agregar Club"}</button>
-                {editandoClubId && <button type="button" onClick={() => { setEditandoClubId(null); setClubForm({nombre: "", logoUrl: "", instagram: "", facebook: ""}); }} className="px-4 bg-slate-200 text-slate-600 font-bold text-xs rounded-lg">Cancelar</button>}
+                {editandoClubId && <button type="button" onClick={() => { setEditandoClubId(null); setClubForm({nombre: "", logoUrl: "", instagram: "", facebook: "", series: []}); }} className="px-4 bg-slate-200 text-slate-600 font-bold text-xs rounded-lg">Cancelar</button>}
               </div>
             </div>
           </form>
@@ -158,10 +193,16 @@ export default function PanelControlMaestro() {
             {clubes.map(c => (
               <div key={c.id} className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-xl hover:shadow-md transition group">
                 <div className="flex items-center gap-3">
-                  {c.logoUrl ? <img src={c.logoUrl} alt="Logo" className="w-10 h-10 object-contain bg-slate-50 p-1 rounded-full border border-slate-200" /> : <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-xs border border-slate-200">🛡️</div>}
+                  {c.logoUrl ? <img src={c.logoUrl} alt="Logo" className="w-10 h-10 object-contain bg-slate-50 p-1 rounded-full border border-slate-200 shrink-0" /> : <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-xs border border-slate-200 shrink-0">🛡️</div>}
                   <div>
                     <p className="font-black text-slate-800 text-sm uppercase">{c.nombre}</p>
                     <p className="text-[9px] text-slate-400 font-mono mt-0.5">ID: {c.id}</p>
+                    {/* Muestra las series en las que participa o una advertencia si no tiene */}
+                    {c.series && c.series.length > 0 ? (
+                       <p className="text-[8px] font-bold text-blue-600 uppercase mt-0.5">{c.series.join(', ')}</p>
+                    ) : (
+                       <p className="text-[8px] font-bold text-orange-500 uppercase mt-0.5">⚠️ Sin series asignadas</p>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
