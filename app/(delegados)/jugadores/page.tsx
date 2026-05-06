@@ -4,21 +4,17 @@ import { db } from "@/lib/firebase";
 import { collection, onSnapshot, query, doc, deleteDoc, setDoc, writeBatch } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
 
-// 🚨 NUEVO: Permite todas las letras y números (ideal para Pasaportes e IDs de Firebase)
 const limpiarIdentificacion = (valor: string) => {
   return valor.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
 };
 
-// 🚨 NUEVO: Formateo Inteligente (RUT vs Pasaporte)
 const formatearIdentificacion = (valor: string) => {
   const limpio = limpiarIdentificacion(valor);
   
-  // Si detecta letras distintas a la 'K', asume que es pasaporte y no le pone puntos ni guion
   if (/[A-J_L-Z]/.test(limpio)) {
     return limpio; 
   }
 
-  // Si son puros números y/o K, lo formatea como RUT tradicional
   if (limpio.length < 7) return limpio;
   let dv = limpio.slice(-1);
   let resto = limpio.slice(0, -1);
@@ -77,7 +73,7 @@ export default function GestionJugadores() {
     if (!rut || !nombre) return alert("Identificación y Nombre son obligatorios.");
     
     const idLimpio = limpiarIdentificacion(rut);
-    if (idLimpio.length < 5) return alert("La identificación es muy corta."); // Permite pasaportes cortos
+    if (idLimpio.length < 5) return alert("La identificación es muy corta.");
 
     const existeEnBD = jugadores.find(j => j.id === idLimpio);
     if (existeEnBD) return alert(`🚨 ALERTA: El jugador con ID ${formatearIdentificacion(idLimpio)} ya está inscrito en el club ${existeEnBD.club}.`);
@@ -132,7 +128,7 @@ export default function GestionJugadores() {
           const serieCSV = columnas[2].trim();
 
           const idLimpio = limpiarIdentificacion(idCSV);
-          if (idLimpio.length < 5) continue; // Ignora filas vacías o basura
+          if (idLimpio.length < 5) continue;
 
           const existeEnBD = jugadores.find(j => j.id === idLimpio);
           
@@ -205,9 +201,13 @@ export default function GestionJugadores() {
     if (confirm(`¿Eliminar definitivamente a ${nombreJugador} del registro?`)) await deleteDoc(doc(db, "asociaciones/san_fabian/jugadores", id));
   };
 
+  // 🚨 CORRECCIÓN: Resolvemos el club directamente adentro para evitar el error de Vercel
   const vaciarClub = async () => {
     if (rol !== 'admin') return;
-    const jugadoresAEliminar = jugadores.filter(j => j.club === clubFiltro && (filtroSerie === "Todas" || j.serie === filtroSerie));
+    
+    const clubParaVaciar = rol === 'admin' ? clubSeleccionado : miClub;
+    const jugadoresAEliminar = jugadores.filter(j => j.club === clubParaVaciar && (filtroSerie === "Todas" || j.serie === filtroSerie));
+    
     if (jugadoresAEliminar.length === 0) return alert("No hay jugadores inscritos en esta selección.");
 
     const confirmacion = window.prompt(`⚠️ ZONA DE PELIGRO: Vas a eliminar a ${jugadoresAEliminar.length} jugadores. Escribe VACIAR para confirmar:`);
@@ -221,6 +221,9 @@ export default function GestionJugadores() {
       } catch (error) { alert("Error al intentar vaciar el padrón."); } finally { setCargandoMasivo(false); }
     }
   };
+
+  const clubFiltro = rol === 'admin' ? clubSeleccionado : miClub;
+  const jugadoresFiltrados = jugadores.filter(j => j.club === clubFiltro && (filtroSerie === "Todas" || j.serie === filtroSerie)).sort((a, b) => a.nombre.localeCompare(b.nombre));
 
   if (authCargando || cargandoDatos) return <div className="p-20 text-center font-bold text-[#1e3a8a] animate-pulse">Cargando base de datos de jugadores...</div>;
 
