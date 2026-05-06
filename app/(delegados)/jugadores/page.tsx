@@ -4,11 +4,24 @@ import { db } from "@/lib/firebase";
 import { collection, onSnapshot, query, doc, deleteDoc, setDoc, writeBatch } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
 
-const formatearRut = (valor: string) => {
-  let cuerpo = valor.replace(/[^0-9kK]/g, "").toUpperCase();
-  if (cuerpo.length < 7) return cuerpo;
-  let dv = cuerpo.slice(-1);
-  let resto = cuerpo.slice(0, -1);
+// 🚨 NUEVO: Permite todas las letras y números (ideal para Pasaportes e IDs de Firebase)
+const limpiarIdentificacion = (valor: string) => {
+  return valor.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+};
+
+// 🚨 NUEVO: Formateo Inteligente (RUT vs Pasaporte)
+const formatearIdentificacion = (valor: string) => {
+  const limpio = limpiarIdentificacion(valor);
+  
+  // Si detecta letras distintas a la 'K', asume que es pasaporte y no le pone puntos ni guion
+  if (/[A-J_L-Z]/.test(limpio)) {
+    return limpio; 
+  }
+
+  // Si son puros números y/o K, lo formatea como RUT tradicional
+  if (limpio.length < 7) return limpio;
+  let dv = limpio.slice(-1);
+  let resto = limpio.slice(0, -1);
   let formateado = "";
   for (let i = resto.length - 1, j = 1; i >= 0; i--, j++) {
     formateado = resto.charAt(i) + formateado;
@@ -20,9 +33,8 @@ const formatearRut = (valor: string) => {
 interface Jugador { id: string; nombre: string; rut: string; club: string; serie: string; partidosSuspendido?: number; }
 interface Club { nombre: string; }
 
-// Interfaces para el Prelistado Masivo
-interface PreJugadorValido { idTemp: string; rutLimpio: string; rutFormat: string; nombre: string; serie: string; }
-interface PreJugadorDuplicado { rutLimpio: string; rutFormat: string; nombreCsv: string; nombreDb: string; clubActual: string; serieCsv: string; }
+interface PreJugadorValido { idTemp: string; idLimpio: string; idFormat: string; nombre: string; serie: string; }
+interface PreJugadorDuplicado { idLimpio: string; idFormat: string; nombreCsv: string; nombreDb: string; clubActual: string; serieCsv: string; }
 
 export default function GestionJugadores() {
   const { rol, club: miClub, authCargando } = useAuth() as any;
@@ -38,7 +50,6 @@ export default function GestionJugadores() {
   const [clubSeleccionado, setClubSeleccionado] = useState("");
   const [filtroSerie, setFiltroSerie] = useState("Todas");
   
-  // Estados de la Vista Previa Masiva
   const [cargandoMasivo, setCargandoMasivo] = useState(false);
   const [preValidos, setPreValidos] = useState<PreJugadorValido[]>([]);
   const [preDuplicados, setPreDuplicados] = useState<PreJugadorDuplicado[]>([]);
@@ -61,20 +72,20 @@ export default function GestionJugadores() {
     return () => { unsubC(); unsubJ(); };
   }, [authCargando, rol, miClub]);
 
-  // --- CARGA MANUAL (AHORA CON RUT COMO ID) ---
   const registrarJugador = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!rut || !nombre) return alert("RUT y Nombre son obligatorios.");
-    const rutLimpio = rut.replace(/[^0-9kK]/g, "").toUpperCase();
+    if (!rut || !nombre) return alert("Identificación y Nombre son obligatorios.");
     
-    const existeEnBD = jugadores.find(j => j.id === rutLimpio);
-    if (existeEnBD) return alert(`🚨 ALERTA: El RUT ${formatearRut(rutLimpio)} ya está inscrito en el club ${existeEnBD.club}.`);
+    const idLimpio = limpiarIdentificacion(rut);
+    if (idLimpio.length < 5) return alert("La identificación es muy corta."); // Permite pasaportes cortos
+
+    const existeEnBD = jugadores.find(j => j.id === idLimpio);
+    if (existeEnBD) return alert(`🚨 ALERTA: El jugador con ID ${formatearIdentificacion(idLimpio)} ya está inscrito en el club ${existeEnBD.club}.`);
 
     try {
-      // 🚨 MEJORA ARQUITECTURA: Guardamos usando setDoc y el rutLimpio como ID del documento
-      await setDoc(doc(db, "asociaciones/san_fabian/jugadores", rutLimpio), {
+      await setDoc(doc(db, "asociaciones/san_fabian/jugadores", idLimpio), {
         nombre: nombre.toUpperCase().trim(),
-        rut: formatearRut(rutLimpio),
+        rut: formatearIdentificacion(idLimpio),
         club: clubSeleccionado,
         serie,
         partidosSuspendido: 0
@@ -84,9 +95,8 @@ export default function GestionJugadores() {
     } catch (error) { alert("Error al inscribir jugador."); }
   };
 
-  // --- PROCESAMIENTO CSV (VISTA PREVIA) ---
   const descargarPlantillaCSV = () => {
-    const contenido = "RUT,NOMBRE_COMPLETO,SERIE\n11111111-1,JUAN PEREZ,Honor\n22222222-2,PEDRO GOMEZ,Juvenil";
+    const contenido = "RUT_O_PASAPORTE,NOMBRE_COMPLETO,SERIE\n11111111-1,JUAN PEREZ,Honor\nP1234567,PEDRO EXTRANJERO,Juvenil";
     const blob = new Blob([contenido], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
@@ -117,24 +127,23 @@ export default function GestionJugadores() {
           const columnas = linea.split(',');
           if (columnas.length < 3) continue;
 
-          const rutCSV = columnas[0].trim();
+          const idCSV = columnas[0].trim();
           const nombreCSV = columnas[1].toUpperCase().trim();
           const serieCSV = columnas[2].trim();
 
-          const rutLimpio = rutCSV.replace(/[^0-9kK]/g, "").toUpperCase();
-          if (rutLimpio.length < 7) continue;
+          const idLimpio = limpiarIdentificacion(idCSV);
+          if (idLimpio.length < 5) continue; // Ignora filas vacías o basura
 
-          // Verificamos si ya existe por el ID
-          const existeEnBD = jugadores.find(j => j.id === rutLimpio);
+          const existeEnBD = jugadores.find(j => j.id === idLimpio);
           
           if (existeEnBD) {
             duplicadosTemp.push({
-              rutLimpio, rutFormat: formatearRut(rutLimpio), nombreCsv: nombreCSV, 
+              idLimpio, idFormat: formatearIdentificacion(idLimpio), nombreCsv: nombreCSV, 
               nombreDb: existeEnBD.nombre, clubActual: existeEnBD.club, serieCsv: serieCSV
             });
           } else {
             validosTemp.push({
-              idTemp: Math.random().toString(), rutLimpio, rutFormat: formatearRut(rutLimpio), 
+              idTemp: Math.random().toString(), idLimpio, idFormat: formatearIdentificacion(idLimpio), 
               nombre: nombreCSV, serie: serieCSV
             });
           }
@@ -153,7 +162,6 @@ export default function GestionJugadores() {
     reader.readAsText(file);
   };
 
-  // --- ACCIONES DE LA VISTA PREVIA ---
   const actualizarPreValido = (idTemp: string, campo: string, valor: string) => {
     setPreValidos(prev => prev.map(p => p.idTemp === idTemp ? { ...p, [campo]: valor } : p));
   };
@@ -167,8 +175,8 @@ export default function GestionJugadores() {
     try {
       const batch = writeBatch(db);
       preValidos.forEach(j => {
-        const docRef = doc(db, "asociaciones/san_fabian/jugadores", j.rutLimpio);
-        batch.set(docRef, { nombre: j.nombre.toUpperCase().trim(), rut: j.rutFormat, club: clubSeleccionado, serie: j.serie, partidosSuspendido: 0 });
+        const docRef = doc(db, "asociaciones/san_fabian/jugadores", j.idLimpio);
+        batch.set(docRef, { nombre: j.nombre.toUpperCase().trim(), rut: j.idFormat, club: clubSeleccionado, serie: j.serie, partidosSuspendido: 0 });
       });
       await batch.commit();
       alert(`✅ ¡Éxito! ${preValidos.length} jugadores fueron guardados en la base de datos.`);
@@ -181,20 +189,18 @@ export default function GestionJugadores() {
   const forzarTraspasoDuplicado = async (dup: PreJugadorDuplicado) => {
     if (confirm(`¿Forzar el traspaso de ${dup.nombreDb} desde ${dup.clubActual} a tu club (${clubSeleccionado})?`)) {
       try {
-        await setDoc(doc(db, "asociaciones/san_fabian/jugadores", dup.rutLimpio), {
+        await setDoc(doc(db, "asociaciones/san_fabian/jugadores", dup.idLimpio), {
           club: clubSeleccionado,
-          serie: dup.serieCsv // Le actualizamos la serie a la nueva
-        }, { merge: true }); // Merge actualiza sin borrar sus suspensiones
+          serie: dup.serieCsv 
+        }, { merge: true }); 
         
-        // Lo sacamos de la lista de conflictos
-        setPreDuplicados(prev => prev.filter(p => p.rutLimpio !== dup.rutLimpio));
+        setPreDuplicados(prev => prev.filter(p => p.idLimpio !== dup.idLimpio));
         alert("🔄 Jugador traspasado con éxito.");
         if (preValidos.length === 0 && preDuplicados.length <= 1) setModoIngreso("masivo");
       } catch (error) { alert("Error al realizar el traspaso."); }
     }
   };
 
-  // --- ELIMINACIONES GLOBALES ---
   const eliminarJugador = async (id: string, nombreJugador: string) => {
     if (confirm(`¿Eliminar definitivamente a ${nombreJugador} del registro?`)) await deleteDoc(doc(db, "asociaciones/san_fabian/jugadores", id));
   };
@@ -216,15 +222,6 @@ export default function GestionJugadores() {
     }
   };
 
-  const manejarInputRut = (valor: string) => {
-    const soloNumerosYK = /^[0-9kK.-]+$/.test(valor);
-    if (soloNumerosYK && valor.length > 2) setRut(formatearRut(valor));
-    else setRut(valor.toUpperCase());
-  };
-
-  const clubFiltro = rol === 'admin' ? clubSeleccionado : miClub;
-  const jugadoresFiltrados = jugadores.filter(j => j.club === clubFiltro && (filtroSerie === "Todas" || j.serie === filtroSerie)).sort((a, b) => a.nombre.localeCompare(b.nombre));
-
   if (authCargando || cargandoDatos) return <div className="p-20 text-center font-bold text-[#1e3a8a] animate-pulse">Cargando base de datos de jugadores...</div>;
 
   return (
@@ -237,7 +234,6 @@ export default function GestionJugadores() {
         <div className="absolute right-[-20px] top-[-40px] opacity-10 text-[150px] pointer-events-none">⚽</div>
       </header>
 
-      {/* 🚨 ZONA DE VISTA PREVIA MASIVA (TOMA EL CONTROL DE LA PANTALLA SI ESTÁ ACTIVA) */}
       {modoIngreso === "previa" ? (
         <div className="bg-white p-6 md:p-10 rounded-3xl shadow-2xl border-4 border-[#1e3a8a] space-y-8 animate-in slide-in-from-bottom-8">
           <div className="flex justify-between items-center border-b pb-4">
@@ -248,18 +244,17 @@ export default function GestionJugadores() {
             <button onClick={() => { setModoIngreso("masivo"); setPreValidos([]); setPreDuplicados([]); }} className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-4 py-2 rounded-xl font-bold text-xs transition">Cancelar Subida</button>
           </div>
 
-          {/* TABLA 1: JUGADORES VÁLIDOS (EDITABLES) */}
           <div className="space-y-4">
             <h3 className="font-black text-emerald-600 uppercase tracking-widest flex items-center gap-2"><span className="bg-emerald-100 p-2 rounded-lg">✅</span> Jugadores Nuevos Listos ({preValidos.length})</h3>
             {preValidos.length === 0 ? <p className="text-slate-400 italic text-sm">No se encontraron jugadores nuevos válidos en el archivo.</p> : (
               <div className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden">
                 <div className="max-h-[300px] overflow-y-auto">
                   <table className="w-full text-left">
-                    <thead className="bg-slate-100 sticky top-0 shadow-sm z-10"><tr className="text-[10px] text-slate-500 uppercase tracking-widest"><th className="p-3">RUT</th><th className="p-3">Nombre</th><th className="p-3">Serie Asignada</th><th className="p-3 text-center">Acción</th></tr></thead>
+                    <thead className="bg-slate-100 sticky top-0 shadow-sm z-10"><tr className="text-[10px] text-slate-500 uppercase tracking-widest"><th className="p-3">RUT / Pasaporte</th><th className="p-3">Nombre</th><th className="p-3">Serie Asignada</th><th className="p-3 text-center">Acción</th></tr></thead>
                     <tbody className="divide-y divide-slate-200">
                       {preValidos.map(j => (
                         <tr key={j.idTemp} className="hover:bg-white transition">
-                          <td className="p-2"><input type="text" value={j.rutFormat} readOnly className="w-full bg-transparent font-mono text-xs text-slate-500 outline-none" /></td>
+                          <td className="p-2"><input type="text" value={j.idFormat} readOnly className="w-full bg-transparent font-mono text-xs text-slate-500 outline-none" /></td>
                           <td className="p-2"><input type="text" value={j.nombre} onChange={e => actualizarPreValido(j.idTemp, 'nombre', e.target.value)} className="w-full p-2 border border-slate-200 rounded font-bold text-xs uppercase focus:border-emerald-500 outline-none" /></td>
                           <td className="p-2"><select value={j.serie} onChange={e => actualizarPreValido(j.idTemp, 'serie', e.target.value)} className="w-full p-2 border border-slate-200 rounded font-bold text-xs outline-none"><option value="Honor">Honor</option><option value="Segunda">Segunda</option><option value="Juvenil">Juvenil</option><option value="Senior 35">Senior 35</option><option value="Senior 40">Senior 40</option><option value="Damas">Damas</option></select></td>
                           <td className="p-2 text-center"><button onClick={() => quitarPreValido(j.idTemp)} className="text-slate-400 hover:text-red-500 p-2">✖</button></td>
@@ -271,7 +266,7 @@ export default function GestionJugadores() {
                 {preValidos.length > 0 && (
                   <div className="p-4 bg-white border-t border-slate-200">
                     <button onClick={guardarPrelistadoBD} disabled={cargandoMasivo} className="w-full py-3 bg-emerald-600 text-white font-black rounded-xl uppercase tracking-widest shadow-lg hover:bg-emerald-700 transition disabled:opacity-50">
-                      {cargandoMasivo ? "Guardando en BD..." : "💾 Guardar Nuevos Jugadores en la Base de Datos"}
+                      {cargandoMasivo ? "Guardando en BD..." : "💾 Guardar Nuevos Jugadores en BD"}
                     </button>
                   </div>
                 )}
@@ -279,20 +274,19 @@ export default function GestionJugadores() {
             )}
           </div>
 
-          {/* TABLA 2: CONFLICTOS Y DUPLICADOS */}
           {preDuplicados.length > 0 && (
             <div className="space-y-4 pt-6 border-t border-dashed border-slate-200">
               <h3 className="font-black text-orange-600 uppercase tracking-widest flex items-center gap-2"><span className="bg-orange-100 p-2 rounded-lg">⚠️</span> Conflictos Detectados ({preDuplicados.length})</h3>
-              <p className="text-xs font-bold text-slate-500">Estos RUTs ya existen en la base de datos. Puedes ignorarlos o forzar su traspaso a tu club.</p>
+              <p className="text-xs font-bold text-slate-500">Estos jugadores ya existen en la base de datos. Puedes ignorarlos o forzar su traspaso a tu club.</p>
               
               <div className="bg-white rounded-xl border-2 border-orange-200 overflow-hidden">
                 <div className="max-h-[300px] overflow-y-auto">
                   <table className="w-full text-left">
-                    <thead className="bg-orange-50 sticky top-0 shadow-sm z-10"><tr className="text-[10px] text-orange-800 uppercase tracking-widest"><th className="p-3">Jugador / RUT</th><th className="p-3">Estado Actual</th><th className="p-3 text-right">Resolución</th></tr></thead>
+                    <thead className="bg-orange-50 sticky top-0 shadow-sm z-10"><tr className="text-[10px] text-orange-800 uppercase tracking-widest"><th className="p-3">Jugador / ID</th><th className="p-3">Estado Actual</th><th className="p-3 text-right">Resolución</th></tr></thead>
                     <tbody className="divide-y divide-orange-100">
                       {preDuplicados.map(dup => (
-                        <tr key={dup.rutLimpio} className="hover:bg-orange-50/50 transition">
-                          <td className="p-3"><p className="font-black text-slate-800 text-xs uppercase">{dup.nombreDb}</p><p className="font-mono text-[10px] text-slate-500">{dup.rutFormat}</p></td>
+                        <tr key={dup.idLimpio} className="hover:bg-orange-50/50 transition">
+                          <td className="p-3"><p className="font-black text-slate-800 text-xs uppercase">{dup.nombreDb}</p><p className="font-mono text-[10px] text-slate-500">{dup.idFormat}</p></td>
                           <td className="p-3"><span className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-[10px] font-black uppercase">Inscrito en {dup.clubActual}</span></td>
                           <td className="p-3 text-right">
                             {dup.clubActual === clubSeleccionado ? (
@@ -313,7 +307,6 @@ export default function GestionJugadores() {
           )}
         </div>
       ) : (
-        /* 🚨 LA INTERFAZ NORMAL SI NO ESTAMOS EN VISTA PREVIA */
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <div className="lg:col-span-4">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 sticky top-24">
@@ -330,7 +323,7 @@ export default function GestionJugadores() {
 
               {modoIngreso === "manual" ? (
                 <form onSubmit={registrarJugador} className="space-y-4 animate-in slide-in-from-left-2 duration-300">
-                  <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1">RUT o Pasaporte</label><input type="text" value={rut} onChange={e => manejarInputRut(e.target.value)} placeholder="Ej: 12.345.678-9" className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl font-black text-sm outline-none uppercase" required /></div>
+                  <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1">RUT o Pasaporte</label><input type="text" value={rut} onChange={e => setRut(formatearIdentificacion(e.target.value))} placeholder="Ej: 12.345.678-9 o P123456" className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl font-black text-sm outline-none uppercase" required /></div>
                   <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Nombre Completo</label><input type="text" value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Ej: Juan Pérez" className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl font-bold text-sm outline-none uppercase" required /></div>
                   <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Serie Asignada</label><select value={serie} onChange={e => setSerie(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl font-bold text-sm outline-none"><option value="Honor">Honor</option><option value="Segunda">Segunda</option><option value="Juvenil">Juvenil</option><option value="Senior 35">Senior 35</option><option value="Senior 40">Senior 40</option><option value="Damas">Damas</option></select></div>
                   <button type="submit" className="w-full py-4 bg-[#1e3a8a] text-white rounded-xl font-black shadow-lg hover:bg-blue-800 transition uppercase tracking-widest text-xs mt-4">Guardar Registro</button>
@@ -372,7 +365,7 @@ export default function GestionJugadores() {
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                <div className="overflow-x-auto">
                   <table className="w-full min-w-[500px] text-left border-collapse">
-                     <thead><tr className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-widest border-b border-slate-200"><th className="p-4 font-bold">RUT</th><th className="p-4 font-bold">Nombre Jugador</th><th className="p-4 font-bold text-center">Serie</th><th className="p-4 font-bold text-center">Gestión</th></tr></thead>
+                     <thead><tr className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-widest border-b border-slate-200"><th className="p-4 font-bold">RUT / Pasaporte</th><th className="p-4 font-bold">Nombre Jugador</th><th className="p-4 font-bold text-center">Serie</th><th className="p-4 font-bold text-center">Gestión</th></tr></thead>
                      <tbody className="divide-y divide-slate-100">
                        {jugadoresFiltrados.length === 0 ? <tr><td colSpan={4} className="p-10 text-center font-bold text-slate-400">No hay jugadores inscritos en esta selección.</td></tr> : (
                          jugadoresFiltrados.map((j, i) => (
