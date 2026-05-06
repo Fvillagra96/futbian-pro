@@ -102,7 +102,7 @@ function EnrutadorHermetico({ children }: { children: React.ReactNode }) {
                   <Link href="/jugadores" className="hover:bg-blue-800 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition tracking-wider">Padrón</Link>
                   <Link href="/admin/programacion" className="bg-blue-700 hover:bg-blue-600 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition shadow-sm ml-1">Programar</Link>
                   <Link href="/admin/actas" className="bg-red-600 hover:bg-red-500 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition shadow-sm ml-1">Tribunal</Link>
-                  
+                  <Link href="/admin/resultados" className="bg-emerald-600 hover:bg-emerald-500 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition shadow-sm ml-1">Resultados</Link>
                   {/* BOTÓN CLASIFICACIÓN ADMIN */}
                   <Link href="/clasificacion" className="text-yellow-400 hover:bg-blue-800 px-3 py-2 rounded-md text-[11px] font-bold uppercase transition tracking-wider">Padrón Final</Link>
                   
@@ -175,6 +175,7 @@ function EnrutadorHermetico({ children }: { children: React.ReactNode }) {
                     <Link href="/admin/sanciones" className="block px-3 py-2 rounded-md text-sm font-bold hover:bg-blue-800 uppercase tracking-wider">⚠️ Castigos Globales</Link>
                     <Link href="/admin/multas" className="block px-3 py-2 rounded-md text-sm font-bold hover:bg-blue-800 uppercase tracking-wider">💰 Tesorería</Link>
                     <Link href="/admin/reglas" className="block px-3 py-2 rounded-md text-sm font-bold hover:bg-blue-800 uppercase tracking-wider">⚙️ Reglas Torneo</Link>
+                    <Link href="/admin/resultados" className="block px-3 py-2 rounded-md text-sm font-bold bg-emerald-600 mt-2 uppercase tracking-wider">🔢 Resultados Rápidos</Link>
                   </>
                 )}
                 
