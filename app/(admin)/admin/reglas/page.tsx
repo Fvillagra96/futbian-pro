@@ -1,11 +1,16 @@
 'use client'
 import { useState, useEffect } from "react";
 import { db } from "@/lib/firebase";
-import { collection, onSnapshot, doc, setDoc, updateDoc, deleteDoc, addDoc } from "firebase/firestore";
+import { collection, onSnapshot, doc, setDoc, updateDoc, deleteDoc } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
 
-interface AsociacionInfo { nombre?: string; logoUrl?: string; instagram?: string; facebook?: string; auspiciadorNombre?: string; auspiciadorLogo?: string; }
+interface AsociacionInfo { 
+  nombre?: string; logoUrl?: string; auspiciadorNombre?: string; auspiciadorLogo?: string; 
+  minPartidosLiguilla?: Record<string, number>;
+}
 interface Club { id: string; nombre: string; logoUrl?: string; instagram?: string; facebook?: string; }
+
+const SERIES_DEFAULT = ["Honor", "Segunda", "Juvenil", "Senior 35", "Senior 40", "Damas"];
 
 export default function PanelControlMaestro() {
   const { authCargando } = useAuth() as any;
@@ -35,9 +40,19 @@ export default function PanelControlMaestro() {
     setGuardandoAsoc(true);
     try {
       await setDoc(doc(db, "asociaciones", "san_fabian"), infoAsoc, { merge: true });
-      alert("✅ Datos actualizados con éxito.");
+      alert("✅ Configuraciones Globales actualizadas con éxito.");
     } catch (error) { alert("Error al guardar."); }
     setGuardandoAsoc(false);
+  };
+
+  const manejarMinPartidos = (serie: string, valor: number) => {
+    setInfoAsoc(prev => ({
+      ...prev,
+      minPartidosLiguilla: {
+        ...(prev.minPartidosLiguilla || {}),
+        [serie]: valor
+      }
+    }));
   };
 
   const guardarClub = async (e: React.FormEvent) => {
@@ -48,8 +63,13 @@ export default function PanelControlMaestro() {
         await updateDoc(doc(db, "asociaciones/san_fabian/clubes", editandoClubId), clubForm);
         setEditandoClubId(null);
       } else {
-        if (clubes.some(c => c.nombre.toLowerCase() === clubForm.nombre.toLowerCase())) return alert("Ya existe.");
-        await addDoc(collection(db, "asociaciones/san_fabian/clubes"), clubForm);
+        if (clubes.some(c => c.nombre.toLowerCase() === clubForm.nombre.toLowerCase())) return alert("Ya existe un club con este nombre.");
+        
+        // 🚨 AQUÍ ESTÁ LA MEJORA: Formateamos el nombre para que sea el ID de la base de datos
+        const idClubFormateado = clubForm.nombre.trim().replace(/\s+/g, '_').toLowerCase();
+        
+        // Usamos setDoc en lugar de addDoc para forzar el ID
+        await setDoc(doc(db, "asociaciones/san_fabian/clubes", idClubFormateado), clubForm);
       }
       setClubForm({ nombre: "", logoUrl: "", instagram: "", facebook: "" });
     } catch (error) { console.error(error); }
@@ -78,19 +98,43 @@ export default function PanelControlMaestro() {
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-          <h3 className="font-black text-slate-800 mb-6 flex items-center gap-2 border-b pb-4"><span className="text-2xl">🏆</span> Datos Liga y Auspiciador</h3>
-          <form onSubmit={guardarInfoAsociacion} className="space-y-4">
-            <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-100">
-              <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Nombre Oficial</label><input type="text" value={infoAsoc.nombre || ""} onChange={e => setInfoAsoc({...infoAsoc, nombre: e.target.value})} className="w-full p-2.5 bg-white border border-slate-300 rounded-lg font-bold text-sm outline-none" /></div>
-              <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">URL Logo Asociación</label><input type="url" value={infoAsoc.logoUrl || ""} onChange={e => setInfoAsoc({...infoAsoc, logoUrl: e.target.value})} className="w-full p-2.5 bg-white border border-slate-300 rounded-lg text-sm outline-none" /></div>
-            </div>
-            <div className="space-y-3 bg-emerald-50 p-4 rounded-xl border border-emerald-100">
-              <div><label className="block text-[10px] font-bold text-emerald-600 uppercase mb-1">Auspiciador Principal</label><input type="text" value={infoAsoc.auspiciadorNombre || ""} onChange={e => setInfoAsoc({...infoAsoc, auspiciadorNombre: e.target.value})} className="w-full p-2.5 bg-white border border-emerald-200 rounded-lg font-bold text-sm outline-none" /></div>
-              <div><label className="block text-[10px] font-bold text-emerald-600 uppercase mb-1">URL Logo Auspiciador</label><input type="url" value={infoAsoc.auspiciadorLogo || ""} onChange={e => setInfoAsoc({...infoAsoc, auspiciadorLogo: e.target.value})} className="w-full p-2.5 bg-white border border-emerald-200 rounded-lg text-sm outline-none" /></div>
-            </div>
-            <button type="submit" disabled={guardandoAsoc} className="w-full py-4 bg-slate-800 text-white rounded-xl font-black shadow-lg hover:bg-black transition uppercase tracking-widest text-xs disabled:opacity-50">{guardandoAsoc ? "Guardando..." : "Actualizar Globales"}</button>
-          </form>
+        <div className="space-y-6">
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+            <h3 className="font-black text-slate-800 mb-6 flex items-center gap-2 border-b pb-4"><span className="text-2xl">🏆</span> Configuraciones Globales</h3>
+            <form onSubmit={guardarInfoAsociacion} className="space-y-6">
+              
+              <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                <h4 className="text-[10px] font-black text-slate-400 uppercase mb-2">Identidad Visual</h4>
+                <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Nombre Oficial</label><input type="text" value={infoAsoc.nombre || ""} onChange={e => setInfoAsoc({...infoAsoc, nombre: e.target.value})} className="w-full p-2.5 bg-white border border-slate-300 rounded-lg font-bold text-sm outline-none" /></div>
+                <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">URL Logo Asociación</label><input type="url" value={infoAsoc.logoUrl || ""} onChange={e => setInfoAsoc({...infoAsoc, logoUrl: e.target.value})} className="w-full p-2.5 bg-white border border-slate-300 rounded-lg text-sm outline-none" /></div>
+              </div>
+              
+              <div className="space-y-3 bg-emerald-50 p-4 rounded-xl border border-emerald-100">
+                <h4 className="text-[10px] font-black text-emerald-600 uppercase mb-2">Auspiciador</h4>
+                <div><label className="block text-[10px] font-bold text-emerald-600 uppercase mb-1">Auspiciador Principal</label><input type="text" value={infoAsoc.auspiciadorNombre || ""} onChange={e => setInfoAsoc({...infoAsoc, auspiciadorNombre: e.target.value})} className="w-full p-2.5 bg-white border border-emerald-200 rounded-lg font-bold text-sm outline-none" /></div>
+                <div><label className="block text-[10px] font-bold text-emerald-600 uppercase mb-1">URL Logo Auspiciador</label><input type="url" value={infoAsoc.auspiciadorLogo || ""} onChange={e => setInfoAsoc({...infoAsoc, auspiciadorLogo: e.target.value})} className="w-full p-2.5 bg-white border border-emerald-200 rounded-lg text-sm outline-none" /></div>
+              </div>
+
+              <div className="space-y-3 bg-amber-50 p-4 rounded-xl border border-amber-100">
+                <h4 className="text-[10px] font-black text-amber-600 uppercase mb-2 flex items-center gap-2">⭐ Partidos Mínimos para Liguilla</h4>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {SERIES_DEFAULT.map(serie => {
+                    const valorActual = infoAsoc.minPartidosLiguilla?.[serie] !== undefined ? infoAsoc.minPartidosLiguilla[serie] : 3;
+                    return (
+                      <div key={serie} className="bg-white p-2 rounded-lg border border-amber-200 text-center shadow-sm">
+                        <label className="block text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1 truncate">{serie}</label>
+                        <input type="number" min="0" value={valorActual} onChange={e => manejarMinPartidos(serie, Number(e.target.value))} className="w-full p-1.5 text-center font-black text-lg text-[#1e3a8a] outline-none rounded bg-slate-50 border border-slate-200" />
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <button type="submit" disabled={guardandoAsoc} className="w-full py-4 bg-slate-800 text-white rounded-xl font-black shadow-lg hover:bg-black transition uppercase tracking-widest text-xs disabled:opacity-50 flex justify-center items-center gap-2">
+                {guardandoAsoc ? "Guardando..." : "💾 Guardar Configuraciones Globales"}
+              </button>
+            </form>
+          </div>
         </div>
 
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col h-[700px]">
@@ -115,7 +159,10 @@ export default function PanelControlMaestro() {
               <div key={c.id} className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-xl hover:shadow-md transition group">
                 <div className="flex items-center gap-3">
                   {c.logoUrl ? <img src={c.logoUrl} alt="Logo" className="w-10 h-10 object-contain bg-slate-50 p-1 rounded-full border border-slate-200" /> : <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-xs border border-slate-200">🛡️</div>}
-                  <div><p className="font-black text-slate-800 text-sm uppercase">{c.nombre}</p></div>
+                  <div>
+                    <p className="font-black text-slate-800 text-sm uppercase">{c.nombre}</p>
+                    <p className="text-[9px] text-slate-400 font-mono mt-0.5">ID: {c.id}</p>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
                   <button onClick={() => prepararEdicionClub(c)} className="p-2 bg-blue-50 text-blue-600 rounded-lg transition text-xs">✏️</button>

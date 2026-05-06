@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect, useMemo } from "react";
 import { db } from "@/lib/firebase";
-import { collection, addDoc, onSnapshot, query, orderBy, doc, deleteDoc, updateDoc } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, doc, deleteDoc, updateDoc, setDoc } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
 
 interface Club { nombre: string; }
@@ -51,15 +51,19 @@ export default function ModuloProgramacion() {
     e.preventDefault();
     if (local === visita) return alert("El equipo local y visita no pueden ser el mismo.");
     if (!dia) return alert("Debes seleccionar un día para el partido.");
+    
+    // 🚨 AQUÍ ESTÁ LA MEJORA: Formateamos el ID exacto fecha+serie+local+visita
+    const idPartidoFormateado = `${fechaNumero}_${serie}_${local}_${visita}`.replace(/\s+/g, '_').toLowerCase();
+
     try {
-      await addDoc(collection(db, "asociaciones/san_fabian/partidos"), {
+      // Usamos setDoc con el ID formateado para evitar duplicados en la base de datos
+      await setDoc(doc(db, "asociaciones/san_fabian/partidos", idPartidoFormateado), {
         fechaNumero: Number(fechaNumero), local, visita, serie, cancha, dia, hora, estado: "Programado", golesLocal: 0, golesVisita: 0, eventos: [], nomina: []
       });
       alert("✅ Partido programado con éxito.");
     } catch (error) { alert("Error al programar el partido."); }
   };
 
-  // 🚨 PODER 1: ELIMINACIÓN TOTAL DESBLOQUEADA
   const eliminarProgramacion = async (id: string, estado: string) => {
     if (estado === "Finalizado") {
       if (!confirm("⚠️ ZONA DE PELIGRO: Este partido ya tiene un acta cerrada. ¿Estás absolutamente seguro de ELIMINARLO por completo del sistema? (Se borrará el fixture también).")) return;
@@ -69,7 +73,6 @@ export default function ModuloProgramacion() {
     await deleteDoc(doc(db, "asociaciones/san_fabian/partidos", id));
   };
 
-  // 🚨 PODER 2: REABRIR ACTA DESDE CERO
   const reabrirActa = async (id: string) => {
     if (confirm("🔄 ¿Estás seguro de REABRIR esta acta? Se borrarán todos los goles, tarjetas y la nómina oficial, y el partido volverá a la Mesa de Turno para ingresarlo desde cero.")) {
       try {
@@ -133,7 +136,7 @@ export default function ModuloProgramacion() {
                 <div className="bg-slate-800 text-white p-4 flex justify-between items-center"><h2 className="font-black text-lg tracking-widest uppercase">FECHA {numFecha}</h2><span className="bg-white/20 px-3 py-1 rounded-lg text-xs font-bold">{partidosFecha.length} Partidos</span></div>
                 <div className="divide-y divide-slate-100">
                   {partidosFecha.map(p => (
-                    <div key={p.id} className="p-4 flex flex-col md:flex-row items-center gap-4 hover:bg-slate-50 transition">
+                    <div key={p.id} className="p-4 flex flex-col md:flex-row items-center gap-4 hover:bg-slate-50 transition relative">
                       <div className="flex flex-col items-center md:items-start w-full md:w-48 shrink-0 border-b md:border-b-0 md:border-r border-slate-200 pb-3 md:pb-0 md:pr-4"><span className="text-[10px] font-black text-slate-400 uppercase">{p.dia}</span><span className="text-lg font-black text-[#1e3a8a]">{p.hora || "Por definir"}</span><span className="text-[10px] font-bold text-slate-500 flex items-center gap-1 mt-1 truncate max-w-full">📍 {p.cancha}</span></div>
                       <div className="flex-1 w-full"><div className="flex justify-center items-center gap-2 mb-1"><span className="bg-blue-100 text-blue-800 text-[9px] px-2 py-0.5 rounded font-black uppercase tracking-widest">SERIE {p.serie}</span></div><div className="flex items-center justify-between font-black text-sm md:text-base"><span className="flex-1 text-right truncate text-slate-700">{p.local}</span><span className="px-4 text-slate-300 font-light italic">VS</span><span className="flex-1 text-left truncate text-slate-700">{p.visita}</span></div></div>
                       
@@ -142,15 +145,15 @@ export default function ModuloProgramacion() {
                         {p.estado === "En Juego" && <span className="bg-orange-100 text-orange-600 text-[10px] px-2 py-1 rounded font-bold w-full text-center animate-pulse">🔥 En Juego</span>}
                         {p.estado === "Finalizado" && <span className="bg-emerald-100 text-emerald-700 text-[10px] px-2 py-1 rounded font-bold w-full text-center">✅ Finalizado</span>}
                         
-                        <div className="flex md:flex-col gap-2 mt-2">
-                          <button onClick={() => eliminarProgramacion(p.id, p.estado)} className="text-[10px] bg-red-50 text-red-500 px-3 py-1.5 rounded-lg hover:bg-red-500 hover:text-white font-bold transition">Eliminar</button>
-                          
-                          {/* BOTÓN REABRIR ACTA */}
+                        <div className="flex md:flex-col gap-2 mt-2 w-full">
+                          <button onClick={() => eliminarProgramacion(p.id, p.estado)} className="text-[10px] bg-red-50 text-red-500 w-full py-1.5 rounded-lg hover:bg-red-500 hover:text-white font-bold transition">Eliminar</button>
                           {p.estado === "Finalizado" && (
-                            <button onClick={() => reabrirActa(p.id)} className="text-[10px] bg-amber-50 text-amber-600 px-3 py-1.5 rounded-lg hover:bg-amber-500 hover:text-white font-bold transition">Reabrir Acta</button>
+                            <button onClick={() => reabrirActa(p.id)} className="text-[10px] bg-amber-50 text-amber-600 w-full py-1.5 rounded-lg hover:bg-amber-500 hover:text-white font-bold transition">Reabrir Acta</button>
                           )}
                         </div>
                       </div>
+                      
+                      <span className="absolute top-2 left-2 text-[7px] text-slate-300 font-mono hidden md:block">ID: {p.id}</span>
                     </div>
                   ))}
                 </div>
