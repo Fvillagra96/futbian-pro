@@ -1,10 +1,11 @@
 'use client'
 import { useState, useEffect, useMemo } from "react";
 import { db } from "@/lib/firebase";
-import { collection, onSnapshot, query, orderBy, doc, deleteDoc, updateDoc, setDoc } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, doc, deleteDoc, updateDoc, writeBatch } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
 
-interface Club { nombre: string; }
+// 🚨 MEJORA: Agregamos el array de series al modelo de Club para poder leerlas
+interface Club { id?: string; nombre: string; series?: string[]; }
 interface Partido { id: string; fechaNumero: number; local: string; visita: string; serie: string; cancha: string; dia: string; hora: string; estado: string; }
 
 export default function ModuloProgramacion() {
@@ -17,18 +18,21 @@ export default function ModuloProgramacion() {
   const [fechaNumero, setFechaNumero] = useState<number>(1);
   const [local, setLocal] = useState<string>("");
   const [visita, setVisita] = useState<string>("");
-  const [serie, setSerie] = useState<string>("Honor");
-  const [cancha, setCancha] = useState<string>("Estadio Municipal");
+  
+  // Estos datos ahora son opcionales, para rellenar de forma general la jornada
+  const [cancha, setCancha] = useState<string>("");
   const [dia, setDia] = useState<string>("");
-  const [hora, setHora] = useState<string>("10:00");
+  const [hora, setHora] = useState<string>("");
 
   useEffect(() => {
     if (authCargando) return;
 
     const unsubC = onSnapshot(collection(db, "asociaciones/san_fabian/clubes"), (snap) => {
-      const data = snap.docs.map(d => d.data() as Club).sort((a, b) => a.nombre.localeCompare(b.nombre));
-      setClubes(data);
-      if (data.length > 1) { setLocal(data[0].nombre); setVisita(data[1].nombre); }
+      // 🚨 MEJORA: Traemos el objeto completo del club, incluyendo sus series
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Club[];
+      const ordenados = data.sort((a, b) => a.nombre.localeCompare(b.nombre));
+      setClubes(ordenados);
+      if (ordenados.length > 1) { setLocal(ordenados[0].nombre); setVisita(ordenados[1].nombre); }
     });
 
     const unsubP = onSnapshot(query(collection(db, "asociaciones/san_fabian/partidos"), orderBy("fechaNumero", "desc")), (snap) => {
@@ -47,26 +51,66 @@ export default function ModuloProgramacion() {
     return grupos;
   }, [partidos]);
 
-  const programarPartido = async (e: React.FormEvent) => {
+  // 🚨 EL NUEVO MOTOR INTELIGENTE DE PROGRAMACIÓN MASIVA
+  const programarJornadaMasiva = async (e: React.FormEvent) => {
     e.preventDefault();
     if (local === visita) return alert("El equipo local y visita no pueden ser el mismo.");
-    if (!dia) return alert("Debes seleccionar un día para el partido.");
     
-    // 🚨 AQUÍ ESTÁ LA MEJORA: Formateamos el ID exacto fecha+serie+local+visita
-    const idPartidoFormateado = `${fechaNumero}_${serie}_${local}_${visita}`.replace(/\s+/g, '_').toLowerCase();
+    // 1. Buscamos la ficha completa de ambos clubes seleccionados
+    const clubLocalObj = clubes.find(c => c.nombre === local);
+    const clubVisitaObj = clubes.find(c => c.nombre === visita);
+
+    if (!clubLocalObj || !clubVisitaObj) return alert("Error al buscar la información de los clubes.");
+
+    const seriesLocal = clubLocalObj.series || [];
+    const seriesVisita = clubVisitaObj.series || [];
+
+    // 2. Comparamos y sacamos solo las series que AMBOS clubes tienen (Match)
+    const seriesEnComun = seriesLocal.filter(s => seriesVisita.includes(s));
+
+    if (seriesEnComun.length === 0) {
+      return alert("⚠️ IMPOSIBLE PROGRAMAR: Estos clubes no tienen ninguna serie en común inscrita. Revisa el padrón de clubes en las Reglas.");
+    }
 
     try {
-      // Usamos setDoc con el ID formateado para evitar duplicados en la base de datos
-      await setDoc(doc(db, "asociaciones/san_fabian/partidos", idPartidoFormateado), {
-        fechaNumero: Number(fechaNumero), local, visita, serie, cancha, dia, hora, estado: "Programado", golesLocal: 0, golesVisita: 0, eventos: [], nomina: []
+      // 3. Creamos una "tanda" de operaciones para crear todos los partidos al mismo tiempo
+      const batch = writeBatch(db);
+      let creados = 0;
+
+      seriesEnComun.forEach(serieMatch => {
+        const idPartidoFormateado = `${fechaNumero}_${serieMatch}_${local}_${visita}`.replace(/\s+/g, '_').toLowerCase();
+        const docRef = doc(db, "asociaciones/san_fabian/partidos", idPartidoFormateado);
+
+        batch.set(docRef, {
+          fechaNumero: Number(fechaNumero), 
+          local, 
+          visita, 
+          serie: serieMatch, 
+          cancha: cancha || "Por definir", 
+          dia: dia || "Por definir", 
+          hora: hora || "Por definir", 
+          estado: "Programado", 
+          golesLocal: 0, 
+          golesVisita: 0, 
+          eventos: [], 
+          nomina: []
+        });
+        creados++;
       });
-      alert("✅ Partido programado con éxito.");
-    } catch (error) { alert("Error al programar el partido."); }
+
+      // 4. Ejecutamos la subida masiva
+      await batch.commit();
+      
+      alert(`✅ ¡JORNADA CREADA CON ÉXITO!\n\nSe programó el encuentro entre ${local} y ${visita}.\nSe generaron ${creados} partidos automáticamente para las series:\n- ${seriesEnComun.join("\n- ")}`);
+    } catch (error) { 
+      alert("Error al programar la jornada."); 
+      console.error(error);
+    }
   };
 
   const eliminarProgramacion = async (id: string, estado: string) => {
     if (estado === "Finalizado") {
-      if (!confirm("⚠️ ZONA DE PELIGRO: Este partido ya tiene un acta cerrada. ¿Estás absolutamente seguro de ELIMINARLO por completo del sistema? (Se borrará el fixture también).")) return;
+      if (!confirm("⚠️ ZONA DE PELIGRO: Este partido ya tiene un acta cerrada. ¿Estás absolutamente seguro de ELIMINARLO por completo?")) return;
     } else {
       if (!confirm("¿Estás seguro de eliminar este partido de la programación?")) return;
     }
@@ -74,7 +118,7 @@ export default function ModuloProgramacion() {
   };
 
   const reabrirActa = async (id: string) => {
-    if (confirm("🔄 ¿Estás seguro de REABRIR esta acta? Se borrarán todos los goles, tarjetas y la nómina oficial, y el partido volverá a la Mesa de Turno para ingresarlo desde cero.")) {
+    if (confirm("🔄 ¿Estás seguro de REABRIR esta acta? Se borrarán todos los goles y la nómina oficial, y volverá a la Mesa de Turno.")) {
       try {
         await updateDoc(doc(db, "asociaciones/san_fabian/partidos", id), {
           estado: "Programado",
@@ -84,10 +128,8 @@ export default function ModuloProgramacion() {
           nomina: [],
           respaldoActa: ""
         });
-        alert("✅ Acta reiniciada con éxito. Ya está disponible nuevamente en la Mesa de Turno.");
-      } catch (error) {
-        alert("Error al reabrir el acta.");
-      }
+        alert("✅ Acta reiniciada con éxito.");
+      } catch (error) { alert("Error al reabrir el acta."); }
     }
   };
 
@@ -106,23 +148,42 @@ export default function ModuloProgramacion() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-4">
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 sticky top-24">
-            <h3 className="font-black text-slate-800 mb-6 flex items-center gap-2 border-b pb-4"><span className="bg-blue-100 text-blue-700 w-8 h-8 rounded-full flex items-center justify-center text-sm">➕</span>Programar Encuentro</h3>
-            <form onSubmit={programarPartido} className="space-y-4">
-              <div className="flex gap-4">
-                <div className="flex-1"><label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Nº Fecha</label><input type="number" min="1" value={fechaNumero} onChange={e => setFechaNumero(Number(e.target.value))} className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl font-black text-center text-[#1e3a8a] text-xl outline-none" required /></div>
-                <div className="flex-[2]"><label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Serie</label><select value={serie} onChange={e => setSerie(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl font-bold text-sm outline-none"><option value="Honor">Honor</option><option value="Segunda">Segunda</option><option value="Juvenil">Juvenil</option><option value="Senior 35">Senior 35</option><option value="Senior 40">Senior 40</option><option value="Damas">Damas</option></select></div>
+            <h3 className="font-black text-slate-800 mb-6 flex items-center gap-2 border-b pb-4">
+              <span className="bg-blue-100 text-blue-700 w-8 h-8 rounded-full flex items-center justify-center text-sm">⚔️</span>
+              Programar Jornada Completa
+            </h3>
+            
+            <form onSubmit={programarJornadaMasiva} className="space-y-4">
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Número de Fecha</label>
+                <input type="number" min="1" value={fechaNumero} onChange={e => setFechaNumero(Number(e.target.value))} className="w-full p-4 bg-slate-50 border border-slate-300 rounded-xl font-black text-center text-[#1e3a8a] text-2xl outline-none focus:ring-2 focus:ring-blue-500 transition" required />
               </div>
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
-                <div><label className="block text-[10px] font-black text-blue-600 uppercase mb-1">Equipo Local</label><select value={local} onChange={e => setLocal(e.target.value)} className="w-full p-2.5 bg-white border border-slate-300 rounded-lg font-bold text-sm outline-none">{clubes.map(c => <option key={`L-${c.nombre}`} value={c.nombre}>{c.nombre}</option>)}</select></div>
-                <div className="text-center font-black text-slate-300 text-xs italic">VS</div>
-                <div><label className="block text-[10px] font-black text-emerald-600 uppercase mb-1">Equipo Visita</label><select value={visita} onChange={e => setVisita(e.target.value)} className="w-full p-2.5 bg-white border border-slate-300 rounded-lg font-bold text-sm outline-none">{clubes.map(c => <option key={`V-${c.nombre}`} value={c.nombre}>{c.nombre}</option>)}</select></div>
+
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-4 shadow-inner">
+                <div>
+                  <label className="block text-[10px] font-black text-blue-600 uppercase mb-1">Club Local</label>
+                  <select value={local} onChange={e => setLocal(e.target.value)} className="w-full p-3 bg-white border border-slate-300 rounded-lg font-bold text-sm outline-none shadow-sm">{clubes.map(c => <option key={`L-${c.nombre}`} value={c.nombre}>{c.nombre}</option>)}</select>
+                </div>
+                <div className="text-center font-black text-slate-300 text-xs italic tracking-widest">VERSUS</div>
+                <div>
+                  <label className="block text-[10px] font-black text-emerald-600 uppercase mb-1">Club Visita</label>
+                  <select value={visita} onChange={e => setVisita(e.target.value)} className="w-full p-3 bg-white border border-slate-300 rounded-lg font-bold text-sm outline-none shadow-sm">{clubes.map(c => <option key={`V-${c.nombre}`} value={c.nombre}>{c.nombre}</option>)}</select>
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Día</label><input type="date" value={dia} onChange={e => setDia(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl font-bold text-xs outline-none" required /></div>
-                <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Hora</label><input type="time" value={hora} onChange={e => setHora(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl font-bold text-xs outline-none" required /></div>
+
+              <div className="pt-4 border-t border-slate-100 space-y-3">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center mb-2">Información General (Opcional)</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <input type="date" value={dia} onChange={e => setDia(e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-lg font-bold text-xs outline-none text-slate-600" title="Día a jugarse" />
+                  <input type="time" value={hora} onChange={e => setHora(e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-lg font-bold text-xs outline-none text-slate-600" title="Hora de inicio (Aprox)" />
+                </div>
+                <input type="text" placeholder="Recinto (Ej: Estadio Municipal)" value={cancha} onChange={e => setCancha(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-300 rounded-lg font-bold text-xs outline-none text-slate-600" />
               </div>
-              <div><label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Recinto Deportivo</label><input type="text" placeholder="Ej: Estadio Municipal" value={cancha} onChange={e => setCancha(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl font-bold text-sm outline-none" required /></div>
-              <button type="submit" className="w-full py-4 bg-[#1e3a8a] text-white rounded-xl font-black shadow-lg hover:bg-blue-800 transition uppercase tracking-widest text-xs mt-4">Guardar Programación</button>
+
+              <button type="submit" className="w-full py-4 bg-[#1e3a8a] text-white rounded-xl font-black shadow-lg hover:bg-blue-800 transition uppercase tracking-widest text-xs mt-6 flex flex-col items-center gap-1">
+                <span>Generar Jornada Automática</span>
+                <span className="text-[9px] font-bold text-blue-200 lowercase tracking-normal">Calculando match de series...</span>
+              </button>
             </form>
           </div>
         </div>
