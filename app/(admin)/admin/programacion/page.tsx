@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect, useMemo } from "react";
 import { db } from "@/lib/firebase";
-import { collection, addDoc, onSnapshot, query, orderBy, doc, deleteDoc } from "firebase/firestore";
+import { collection, addDoc, onSnapshot, query, orderBy, doc, deleteDoc, updateDoc } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
 
 interface Club { nombre: string; }
@@ -33,10 +33,7 @@ export default function ModuloProgramacion() {
 
     const unsubP = onSnapshot(query(collection(db, "asociaciones/san_fabian/partidos"), orderBy("fechaNumero", "desc")), (snap) => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Partido[];
-      
-      // 🚨 ARREGLO DE ERROR: (a.hora || "") evita el colapso si un partido viejo no tiene hora
       data.sort((a, b) => b.fechaNumero - a.fechaNumero || (a.hora || "").localeCompare(b.hora || ""));
-      
       setPartidos(data);
       setCargandoDatos(false);
     });
@@ -62,15 +59,39 @@ export default function ModuloProgramacion() {
     } catch (error) { alert("Error al programar el partido."); }
   };
 
+  // 🚨 PODER 1: ELIMINACIÓN TOTAL DESBLOQUEADA
   const eliminarProgramacion = async (id: string, estado: string) => {
-    if (estado === "Finalizado") return alert("No puedes eliminar un partido que ya está Finalizado.");
-    if (confirm("¿Estás seguro de eliminar este partido de la programación?")) await deleteDoc(doc(db, "asociaciones/san_fabian/partidos", id));
+    if (estado === "Finalizado") {
+      if (!confirm("⚠️ ZONA DE PELIGRO: Este partido ya tiene un acta cerrada. ¿Estás absolutamente seguro de ELIMINARLO por completo del sistema? (Se borrará el fixture también).")) return;
+    } else {
+      if (!confirm("¿Estás seguro de eliminar este partido de la programación?")) return;
+    }
+    await deleteDoc(doc(db, "asociaciones/san_fabian/partidos", id));
+  };
+
+  // 🚨 PODER 2: REABRIR ACTA DESDE CERO
+  const reabrirActa = async (id: string) => {
+    if (confirm("🔄 ¿Estás seguro de REABRIR esta acta? Se borrarán todos los goles, tarjetas y la nómina oficial, y el partido volverá a la Mesa de Turno para ingresarlo desde cero.")) {
+      try {
+        await updateDoc(doc(db, "asociaciones/san_fabian/partidos", id), {
+          estado: "Programado",
+          golesLocal: 0,
+          golesVisita: 0,
+          eventos: [],
+          nomina: [],
+          respaldoActa: ""
+        });
+        alert("✅ Acta reiniciada con éxito. Ya está disponible nuevamente en la Mesa de Turno.");
+      } catch (error) {
+        alert("Error al reabrir el acta.");
+      }
+    }
   };
 
   if (authCargando || cargandoDatos) return <div className="p-20 text-center font-bold text-[#1e3a8a] animate-pulse">Cargando módulo...</div>;
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6 p-4 animate-in fade-in duration-500">
+    <div className="max-w-7xl mx-auto space-y-6 p-4 animate-in fade-in duration-500 pb-20">
       <header className="bg-[#1e3a8a] rounded-3xl p-6 md:p-10 shadow-xl text-white relative overflow-hidden">
         <div className="relative z-10 flex justify-between items-center">
           <div><h2 className="text-blue-300 font-black uppercase tracking-[0.2em] text-xs mb-2">Organización del Campeonato</h2><h1 className="text-3xl md:text-5xl font-black tracking-tighter">FIXTURE Y FECHAS</h1></div>
@@ -113,13 +134,22 @@ export default function ModuloProgramacion() {
                 <div className="divide-y divide-slate-100">
                   {partidosFecha.map(p => (
                     <div key={p.id} className="p-4 flex flex-col md:flex-row items-center gap-4 hover:bg-slate-50 transition">
-                      <div className="flex flex-col items-center md:items-start w-full md:w-48 shrink-0 border-b md:border-b-0 md:border-r border-slate-200 pb-3 md:pb-0 md:pr-4"><span className="text-[10px] font-black text-slate-400 uppercase">{p.dia}</span><span className="text-lg font-black text-[#1e3a8a]">{p.hora}</span><span className="text-[10px] font-bold text-slate-500 flex items-center gap-1 mt-1 truncate max-w-full">📍 {p.cancha}</span></div>
+                      <div className="flex flex-col items-center md:items-start w-full md:w-48 shrink-0 border-b md:border-b-0 md:border-r border-slate-200 pb-3 md:pb-0 md:pr-4"><span className="text-[10px] font-black text-slate-400 uppercase">{p.dia}</span><span className="text-lg font-black text-[#1e3a8a]">{p.hora || "Por definir"}</span><span className="text-[10px] font-bold text-slate-500 flex items-center gap-1 mt-1 truncate max-w-full">📍 {p.cancha}</span></div>
                       <div className="flex-1 w-full"><div className="flex justify-center items-center gap-2 mb-1"><span className="bg-blue-100 text-blue-800 text-[9px] px-2 py-0.5 rounded font-black uppercase tracking-widest">SERIE {p.serie}</span></div><div className="flex items-center justify-between font-black text-sm md:text-base"><span className="flex-1 text-right truncate text-slate-700">{p.local}</span><span className="px-4 text-slate-300 font-light italic">VS</span><span className="flex-1 text-left truncate text-slate-700">{p.visita}</span></div></div>
+                      
                       <div className="w-full md:w-32 shrink-0 flex flex-row md:flex-col items-center justify-center gap-2 border-t md:border-t-0 md:border-l border-slate-200 pt-3 md:pt-0 md:pl-4">
                         {p.estado === "Programado" && <span className="bg-slate-100 text-slate-600 text-[10px] px-2 py-1 rounded font-bold w-full text-center">⏳ Programado</span>}
                         {p.estado === "En Juego" && <span className="bg-orange-100 text-orange-600 text-[10px] px-2 py-1 rounded font-bold w-full text-center animate-pulse">🔥 En Juego</span>}
                         {p.estado === "Finalizado" && <span className="bg-emerald-100 text-emerald-700 text-[10px] px-2 py-1 rounded font-bold w-full text-center">✅ Finalizado</span>}
-                        <button onClick={() => eliminarProgramacion(p.id, p.estado)} className="text-[10px] text-red-400 hover:text-red-600 font-bold underline transition">Eliminar</button>
+                        
+                        <div className="flex md:flex-col gap-2 mt-2">
+                          <button onClick={() => eliminarProgramacion(p.id, p.estado)} className="text-[10px] bg-red-50 text-red-500 px-3 py-1.5 rounded-lg hover:bg-red-500 hover:text-white font-bold transition">Eliminar</button>
+                          
+                          {/* BOTÓN REABRIR ACTA */}
+                          {p.estado === "Finalizado" && (
+                            <button onClick={() => reabrirActa(p.id)} className="text-[10px] bg-amber-50 text-amber-600 px-3 py-1.5 rounded-lg hover:bg-amber-500 hover:text-white font-bold transition">Reabrir Acta</button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
