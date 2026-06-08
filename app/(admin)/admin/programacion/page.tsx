@@ -6,8 +6,6 @@ import { useAuth } from "@/context/AuthContext";
 
 interface Club { id?: string; nombre: string; series?: string[]; }
 interface Partido { id: string; fechaNumero: number; local: string; visita: string; serie: string; cancha: string; dia: string; hora: string; estado: string; }
-
-// Interfaz para manejar múltiples enfrentamientos en el formulario
 interface Encuentro { local: string; visita: string; }
 
 export default function ModuloProgramacion() {
@@ -19,7 +17,6 @@ export default function ModuloProgramacion() {
   
   const [fechaNumero, setFechaNumero] = useState<number>(1);
   
-  // 🚨 MEJORA: Estado para manejar hasta 4 encuentros al mismo tiempo
   const [encuentros, setEncuentros] = useState<Encuentro[]>([
     { local: "", visita: "" },
     { local: "", visita: "" },
@@ -39,7 +36,6 @@ export default function ModuloProgramacion() {
       const ordenados = data.sort((a, b) => a.nombre.localeCompare(b.nombre));
       setClubes(ordenados);
       
-      // Inicializamos el primer encuentro si hay clubes suficientes
       if (ordenados.length > 1) { 
         setEncuentros(prev => {
           const nuevos = [...prev];
@@ -71,11 +67,8 @@ export default function ModuloProgramacion() {
     setEncuentros(nuevosEncuentros);
   };
 
-  // 🚨 EL NUEVO MOTOR INTELIGENTE PARA MÚLTIPLES ENCUENTROS
   const programarJornadaMasiva = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Filtramos solo los encuentros donde se hayan seleccionado ambos equipos
     const encuentrosValidos = encuentros.filter(enc => enc.local !== "" && enc.visita !== "");
 
     if (encuentrosValidos.length === 0) {
@@ -87,7 +80,6 @@ export default function ModuloProgramacion() {
       let creados = 0;
       let resumen: string[] = [];
 
-      // Procesamos cada encuentro válido
       for (const enc of encuentrosValidos) {
         if (enc.local === enc.visita) {
           return alert(`⚠️ Error: El equipo ${enc.local} no puede jugar contra sí mismo.`);
@@ -100,15 +92,12 @@ export default function ModuloProgramacion() {
 
         const seriesLocal = clubLocalObj.series || [];
         const seriesVisita = clubVisitaObj.series || [];
-
-        // Comparamos series (Match)
         const seriesEnComun = seriesLocal.filter(s => seriesVisita.includes(s));
 
         if (seriesEnComun.length === 0) {
           return alert(`⚠️ IMPOSIBLE PROGRAMAR: ${enc.local} vs ${enc.visita} no tienen ninguna serie en común inscrita.`);
         }
 
-        // Agregamos al Batch
         seriesEnComun.forEach(serieMatch => {
           const idPartidoFormateado = `${fechaNumero}_${serieMatch}_${enc.local}_${enc.visita}`.replace(/\s+/g, '_').toLowerCase();
           const docRef = doc(db, "asociaciones/san_fabian/partidos", idPartidoFormateado);
@@ -133,12 +122,10 @@ export default function ModuloProgramacion() {
         resumen.push(`- ${enc.local} vs ${enc.visita} (${seriesEnComun.length} partidos)`);
       }
 
-      // Ejecutamos la subida de todos los partidos de todos los encuentros a la vez
       await batch.commit();
       
       alert(`✅ ¡JORNADA CREADA CON ÉXITO!\n\nSe generaron ${creados} partidos en total para los siguientes enfrentamientos:\n${resumen.join("\n")}`);
       
-      // Opcional: Limpiar los selectores después de programar
       setEncuentros([
         { local: "", visita: "" },
         { local: "", visita: "" },
@@ -181,98 +168,151 @@ export default function ModuloProgramacion() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 p-4 animate-in fade-in duration-500 pb-20">
-      <header className="bg-[#1e3a8a] rounded-3xl p-6 md:p-10 shadow-xl text-white relative overflow-hidden">
-        <div className="relative z-10 flex justify-between items-center">
-          <div><h2 className="text-blue-300 font-black uppercase tracking-[0.2em] text-xs mb-2">Organización del Campeonato</h2><h1 className="text-3xl md:text-5xl font-black tracking-tighter">FIXTURE Y FECHAS</h1></div>
-          <div className="bg-white/10 px-4 py-2 rounded-xl border border-white/20 backdrop-blur-sm"><p className="text-sm font-bold text-white">Modo Admin</p></div>
+      
+      {/* HEADER DE LA PÁGINA */}
+      <header className="bg-gradient-to-r from-[#1e3a8a] to-blue-800 rounded-3xl p-6 md:p-10 shadow-xl text-white relative overflow-hidden">
+        <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h2 className="text-blue-300 font-black uppercase tracking-[0.2em] text-xs mb-2">Organización del Campeonato</h2>
+            <h1 className="text-3xl md:text-5xl font-black tracking-tighter">FIXTURE Y FECHAS</h1>
+          </div>
+          <div className="bg-white/10 px-4 py-2 rounded-xl border border-white/20 backdrop-blur-sm">
+            <p className="text-sm font-bold text-white flex items-center gap-2"><span>🛡️</span> Modo Admin</p>
+          </div>
         </div>
-        <div className="absolute right-[-20px] top-[-20px] opacity-10 text-[150px]">📅</div>
+        <div className="absolute right-[-20px] top-[-20px] opacity-10 text-[150px] select-none pointer-events-none">📅</div>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        
+        {/* COLUMNA IZQUIERDA: FORMULARIO */}
         <div className="lg:col-span-4">
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 sticky top-24">
-            <h3 className="font-black text-slate-800 mb-6 flex items-center gap-2 border-b pb-4">
-              <span className="bg-blue-100 text-blue-700 w-8 h-8 rounded-full flex items-center justify-center text-sm">⚔️</span>
+          <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 sticky top-24">
+            <h3 className="font-black text-slate-800 mb-6 flex items-center gap-3 border-b border-slate-100 pb-4">
+              <span className="bg-[#1e3a8a] text-white w-8 h-8 rounded-xl flex items-center justify-center text-sm shadow-sm">⚔️</span>
               Programar Jornada
             </h3>
             
-            <form onSubmit={programarJornadaMasiva} className="space-y-4">
+            <form onSubmit={programarJornadaMasiva} className="space-y-6">
+              
+              {/* NÚMERO DE FECHA */}
               <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Número de Fecha</label>
-                <input type="number" min="1" value={fechaNumero} onChange={e => setFechaNumero(Number(e.target.value))} className="w-full p-4 bg-slate-50 border border-slate-300 rounded-xl font-black text-center text-[#1e3a8a] text-2xl outline-none focus:ring-2 focus:ring-blue-500 transition" required />
+                <label className="block text-[10px] font-black text-slate-400 uppercase mb-2 tracking-widest">Número de Fecha</label>
+                <input type="number" min="1" value={fechaNumero} onChange={e => setFechaNumero(Number(e.target.value))} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-center text-[#1e3a8a] text-3xl outline-none focus:ring-2 focus:ring-[#1e3a8a] transition shadow-inner" required />
               </div>
 
-              {/* 🚨 RENDERIZADO DINÁMICO DE LOS 4 ENCUENTROS */}
-              <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+              {/* LISTA DE ENCUENTROS (Sin Scroll) */}
+              <div className="space-y-4">
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">Enfrentamientos</label>
+                
                 {encuentros.map((enc, index) => (
-                  <div key={index} className="bg-slate-50 p-3 rounded-xl border border-slate-200 shadow-inner relative">
-                    <span className="absolute -top-2 -left-2 bg-slate-800 text-white text-[9px] font-black w-5 h-5 flex items-center justify-center rounded-full">
-                      {index + 1}
-                    </span>
-                    <div className="space-y-2 pt-2">
-                      <div>
-                        <select value={enc.local} onChange={e => actualizarEncuentro(index, "local", e.target.value)} className="w-full p-2 bg-white border border-slate-300 rounded-lg font-bold text-xs outline-none shadow-sm text-blue-700">
-                          <option value="">-- Local --</option>
-                          {clubes.map(c => <option key={`L-${index}-${c.nombre}`} value={c.nombre}>{c.nombre}</option>)}
-                        </select>
+                  <div key={index} className="bg-slate-50 border border-slate-200 p-4 rounded-2xl shadow-sm relative transition-all hover:border-[#1e3a8a]/30">
+                    {/* Badge del número de partido */}
+                    <div className="absolute top-0 left-0 bg-slate-800 text-white text-[10px] font-black px-3 py-1 rounded-br-xl rounded-tl-2xl shadow-sm">
+                      Partido {index + 1}
+                    </div>
+
+                    <div className="mt-5 space-y-2">
+                      {/* Select Local */}
+                      <select value={enc.local} onChange={e => actualizarEncuentro(index, "local", e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl font-bold text-sm outline-none shadow-sm text-[#1e3a8a] focus:ring-2 focus:ring-[#1e3a8a] transition-all cursor-pointer">
+                        <option value="">-- Seleccionar Local --</option>
+                        {clubes.map(c => <option key={`L-${index}-${c.nombre}`} value={c.nombre}>{c.nombre}</option>)}
+                      </select>
+
+                      {/* Pill VS */}
+                      <div className="flex justify-center items-center">
+                        <span className="bg-slate-200 text-slate-500 text-[9px] font-black px-3 py-1 rounded-full italic uppercase tracking-widest">
+                          VS
+                        </span>
                       </div>
-                      <div className="text-center font-black text-slate-300 text-[10px] italic tracking-widest">VS</div>
-                      <div>
-                        <select value={enc.visita} onChange={e => actualizarEncuentro(index, "visita", e.target.value)} className="w-full p-2 bg-white border border-slate-300 rounded-lg font-bold text-xs outline-none shadow-sm text-emerald-700">
-                          <option value="">-- Visita --</option>
-                          {clubes.map(c => <option key={`V-${index}-${c.nombre}`} value={c.nombre}>{c.nombre}</option>)}
-                        </select>
-                      </div>
+
+                      {/* Select Visita */}
+                      <select value={enc.visita} onChange={e => actualizarEncuentro(index, "visita", e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl font-bold text-sm outline-none shadow-sm text-emerald-700 focus:ring-2 focus:ring-emerald-600 transition-all cursor-pointer">
+                        <option value="">-- Seleccionar Visita --</option>
+                        {clubes.map(c => <option key={`V-${index}-${c.nombre}`} value={c.nombre}>{c.nombre}</option>)}
+                      </select>
                     </div>
                   </div>
                 ))}
               </div>
 
-              <div className="pt-4 border-t border-slate-100 space-y-3">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center mb-2">Información General (Opcional)</p>
+              {/* INFORMACIÓN GENERAL */}
+              <div className="pt-6 border-t border-slate-100 space-y-4">
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Información General (Opcional)</label>
                 <div className="grid grid-cols-2 gap-3">
-                  <input type="date" value={dia} onChange={e => setDia(e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-lg font-bold text-xs outline-none text-slate-600" title="Día a jugarse" />
-                  <input type="time" value={hora} onChange={e => setHora(e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-lg font-bold text-xs outline-none text-slate-600" title="Hora de inicio (Aprox)" />
+                  <input type="date" value={dia} onChange={e => setDia(e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl font-bold text-xs outline-none text-slate-600 focus:ring-2 focus:ring-[#1e3a8a]" title="Día a jugarse" />
+                  <input type="time" value={hora} onChange={e => setHora(e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl font-bold text-xs outline-none text-slate-600 focus:ring-2 focus:ring-[#1e3a8a]" title="Hora de inicio (Aprox)" />
                 </div>
-                <input type="text" placeholder="Recinto (Ej: Estadio Municipal)" value={cancha} onChange={e => setCancha(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-300 rounded-lg font-bold text-xs outline-none text-slate-600" />
+                <input type="text" placeholder="Recinto (Ej: Estadio Municipal)" value={cancha} onChange={e => setCancha(e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl font-bold text-xs outline-none text-slate-600 focus:ring-2 focus:ring-[#1e3a8a]" />
               </div>
 
-              <button type="submit" className="w-full py-4 bg-[#1e3a8a] text-white rounded-xl font-black shadow-lg hover:bg-blue-800 transition uppercase tracking-widest text-xs mt-6 flex flex-col items-center gap-1">
+              {/* BOTÓN SUBMIT */}
+              <button type="submit" className="w-full py-4 bg-[#1e3a8a] text-white rounded-2xl font-black shadow-lg shadow-blue-900/20 hover:bg-blue-800 hover:-translate-y-0.5 transition-all uppercase tracking-widest text-xs mt-4 flex flex-col items-center gap-1 group">
                 <span>Generar Jornada Múltiple</span>
-                <span className="text-[9px] font-bold text-blue-200 lowercase tracking-normal">Procesando todos los partidos...</span>
+                <span className="text-[9px] font-bold text-blue-300 lowercase tracking-normal group-hover:text-blue-200 transition-colors">procesando todos los partidos...</span>
               </button>
             </form>
           </div>
         </div>
 
+        {/* COLUMNA DERECHA: LISTADO DE PARTIDOS */}
         <div className="lg:col-span-8 space-y-6">
           {Object.keys(partidosPorFecha).length === 0 ? (
-            <div className="bg-white rounded-3xl border border-slate-200 h-[400px] flex flex-col justify-center items-center text-slate-400"><span className="text-5xl mb-4">🏟️</span><p className="font-bold">No hay partidos programados aún.</p></div>
+            <div className="bg-white rounded-3xl border border-slate-100 shadow-sm h-[600px] flex flex-col justify-center items-center text-slate-400">
+              <span className="text-6xl mb-6 grayscale opacity-50">🏟️</span>
+              <p className="font-black text-slate-500 text-lg">No hay partidos programados aún.</p>
+              <p className="text-sm mt-2 text-slate-400">Configura la jornada en el panel izquierdo.</p>
+            </div>
           ) : (
             Object.entries(partidosPorFecha).sort(([a], [b]) => Number(b) - Number(a)).map(([numFecha, partidosFecha]) => (
-              <div key={numFecha} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                <div className="bg-slate-800 text-white p-4 flex justify-between items-center"><h2 className="font-black text-lg tracking-widest uppercase">FECHA {numFecha}</h2><span className="bg-white/20 px-3 py-1 rounded-lg text-xs font-bold">{partidosFecha.length} Partidos</span></div>
+              <div key={numFecha} className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+                <div className="bg-slate-800 text-white p-5 flex justify-between items-center">
+                  <h2 className="font-black text-xl tracking-widest uppercase">FECHA {numFecha}</h2>
+                  <span className="bg-white/20 px-4 py-1.5 rounded-xl text-xs font-bold backdrop-blur-sm">{partidosFecha.length} Partidos</span>
+                </div>
                 <div className="divide-y divide-slate-100">
                   {partidosFecha.map(p => (
-                    <div key={p.id} className="p-4 flex flex-col md:flex-row items-center gap-4 hover:bg-slate-50 transition relative">
-                      <div className="flex flex-col items-center md:items-start w-full md:w-48 shrink-0 border-b md:border-b-0 md:border-r border-slate-200 pb-3 md:pb-0 md:pr-4"><span className="text-[10px] font-black text-slate-400 uppercase">{p.dia}</span><span className="text-lg font-black text-[#1e3a8a]">{p.hora || "Por definir"}</span><span className="text-[10px] font-bold text-slate-500 flex items-center gap-1 mt-1 truncate max-w-full">📍 {p.cancha}</span></div>
-                      <div className="flex-1 w-full"><div className="flex justify-center items-center gap-2 mb-1"><span className="bg-blue-100 text-blue-800 text-[9px] px-2 py-0.5 rounded font-black uppercase tracking-widest">SERIE {p.serie}</span></div><div className="flex items-center justify-between font-black text-sm md:text-base"><span className="flex-1 text-right truncate text-slate-700">{p.local}</span><span className="px-4 text-slate-300 font-light italic">VS</span><span className="flex-1 text-left truncate text-slate-700">{p.visita}</span></div></div>
+                    <div key={p.id} className="p-5 flex flex-col md:flex-row items-center gap-6 hover:bg-slate-50 transition relative group">
                       
-                      <div className="w-full md:w-32 shrink-0 flex flex-row md:flex-col items-center justify-center gap-2 border-t md:border-t-0 md:border-l border-slate-200 pt-3 md:pt-0 md:pl-4">
-                        {p.estado === "Programado" && <span className="bg-slate-100 text-slate-600 text-[10px] px-2 py-1 rounded font-bold w-full text-center">⏳ Programado</span>}
-                        {p.estado === "En Juego" && <span className="bg-orange-100 text-orange-600 text-[10px] px-2 py-1 rounded font-bold w-full text-center animate-pulse">🔥 En Juego</span>}
-                        {p.estado === "Finalizado" && <span className="bg-emerald-100 text-emerald-700 text-[10px] px-2 py-1 rounded font-bold w-full text-center">✅ Finalizado</span>}
+                      {/* Info Partido */}
+                      <div className="flex flex-col items-center md:items-start w-full md:w-48 shrink-0 border-b md:border-b-0 md:border-r border-slate-100 pb-4 md:pb-0 md:pr-4">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">{p.dia}</span>
+                        <span className="text-2xl font-black text-[#1e3a8a] my-1">{p.hora || "--:--"}</span>
+                        <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1 truncate max-w-full">
+                          <span className="text-blue-500">📍</span> {p.cancha}
+                        </span>
+                      </div>
+                      
+                      {/* Equipos */}
+                      <div className="flex-1 w-full">
+                        <div className="flex justify-center items-center mb-3">
+                          <span className="bg-blue-50 text-blue-700 border border-blue-100 text-[10px] px-3 py-1 rounded-lg font-black uppercase tracking-widest shadow-sm">
+                            SERIE {p.serie}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between font-black text-base md:text-lg">
+                          <span className="flex-1 text-right truncate text-slate-800">{p.local}</span>
+                          <span className="px-5 text-slate-300 font-bold italic text-sm">VS</span>
+                          <span className="flex-1 text-left truncate text-slate-800">{p.visita}</span>
+                        </div>
+                      </div>
+                      
+                      {/* Acciones & Estado */}
+                      <div className="w-full md:w-36 shrink-0 flex flex-row md:flex-col items-center justify-center gap-3 border-t md:border-t-0 md:border-l border-slate-100 pt-4 md:pt-0 md:pl-4">
+                        {p.estado === "Programado" && <span className="bg-slate-100 text-slate-600 text-[10px] px-3 py-1.5 rounded-lg font-bold w-full text-center uppercase tracking-wider">⏳ Programado</span>}
+                        {p.estado === "En Juego" && <span className="bg-orange-100 text-orange-600 text-[10px] px-3 py-1.5 rounded-lg font-bold w-full text-center uppercase tracking-wider animate-pulse">🔥 En Juego</span>}
+                        {p.estado === "Finalizado" && <span className="bg-emerald-100 text-emerald-700 text-[10px] px-3 py-1.5 rounded-lg font-bold w-full text-center uppercase tracking-wider">✅ Finalizado</span>}
                         
-                        <div className="flex md:flex-col gap-2 mt-2 w-full">
-                          <button onClick={() => eliminarProgramacion(p.id, p.estado)} className="text-[10px] bg-red-50 text-red-500 w-full py-1.5 rounded-lg hover:bg-red-500 hover:text-white font-bold transition">Eliminar</button>
+                        <div className="flex md:flex-col gap-2 w-full mt-1">
+                          <button onClick={() => eliminarProgramacion(p.id, p.estado)} className="text-[11px] bg-red-50 text-red-500 border border-red-100 w-full py-2 rounded-xl hover:bg-red-500 hover:text-white font-bold transition-all">Eliminar</button>
                           {p.estado === "Finalizado" && (
-                            <button onClick={() => reabrirActa(p.id)} className="text-[10px] bg-amber-50 text-amber-600 w-full py-1.5 rounded-lg hover:bg-amber-500 hover:text-white font-bold transition">Reabrir Acta</button>
+                            <button onClick={() => reabrirActa(p.id)} className="text-[11px] bg-amber-50 text-amber-600 border border-amber-100 w-full py-2 rounded-xl hover:bg-amber-500 hover:text-white font-bold transition-all">Reabrir Acta</button>
                           )}
                         </div>
                       </div>
                       
-                      <span className="absolute top-2 left-2 text-[7px] text-slate-300 font-mono hidden md:block">ID: {p.id}</span>
+                      {/* ID Oculto */}
+                      <span className="absolute top-2 left-2 text-[8px] text-slate-300 font-mono hidden md:block opacity-0 group-hover:opacity-100 transition-opacity">ID: {p.id}</span>
                     </div>
                   ))}
                 </div>
@@ -280,6 +320,7 @@ export default function ModuloProgramacion() {
             ))
           )}
         </div>
+
       </div>
     </div>
   );
