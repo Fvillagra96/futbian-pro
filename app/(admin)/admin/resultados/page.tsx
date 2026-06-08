@@ -16,12 +16,14 @@ export default function IngresoResultadosManual() {
   const [procesandoExcel, setProcesandoExcel] = useState(false);
   const [partidos, setPartidos] = useState<Partido[]>([]);
   
+  // 🚨 NUEVO: Estados para los filtros
   const [filtroFecha, setFiltroFecha] = useState<string>("Todas");
+  const [filtroSerie, setFiltroSerie] = useState<string>("Todas");
+  
   const [guardandoId, setGuardandoId] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Estado local para los inputs de goles antes de guardarlos
   const [edicionGoles, setEdicionGoles] = useState<Record<string, { local: number, visita: number }>>({});
 
   useEffect(() => {
@@ -31,7 +33,6 @@ export default function IngresoResultadosManual() {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Partido[];
       setPartidos(data);
       
-      // Sincronizamos el estado local de edición con los datos reales que llegan de Firebase
       const golesIniciales: Record<string, { local: number, visita: number }> = {};
       data.forEach(p => {
         if (!edicionGoles[p.id]) {
@@ -46,17 +47,24 @@ export default function IngresoResultadosManual() {
     return () => unsubP();
   }, [authCargando]);
 
+  // 🚨 NUEVO: Extraemos fechas y series únicas para llenar los selectores
   const numerosDeFechas = useMemo(() => Array.from(new Set(partidos.map(p => p.fechaNumero))).sort((a, b) => b - a), [partidos]);
+  const seriesDisponibles = useMemo(() => Array.from(new Set(partidos.map(p => p.serie))).sort(), [partidos]);
   
+  // 🚨 NUEVO: Lógica de doble filtrado (Fecha + Serie)
   const partidosFiltrados = useMemo(() => {
-    return partidos.filter(p => filtroFecha === "Todas" || p.fechaNumero === Number(filtroFecha));
-  }, [partidos, filtroFecha]);
+    return partidos.filter(p => {
+      const coincideFecha = filtroFecha === "Todas" || p.fechaNumero === Number(filtroFecha);
+      const coincideSerie = filtroSerie === "Todas" || p.serie === filtroSerie;
+      return coincideFecha && coincideSerie;
+    });
+  }, [partidos, filtroFecha, filtroSerie]);
 
   const manejarCambioGol = (id: string, equipo: 'local' | 'visita', valor: string) => {
     const numero = parseInt(valor) || 0;
     setEdicionGoles(prev => ({
       ...prev,
-      [id]: { ...prev[id], [equipo]: Math.max(0, numero) } // Evitamos números negativos
+      [id]: { ...prev[id], [equipo]: Math.max(0, numero) } 
     }));
   };
 
@@ -69,7 +77,7 @@ export default function IngresoResultadosManual() {
       await updateDoc(doc(db, "asociaciones/san_fabian/partidos", partido.id), {
         golesLocal: nuevosGoles.local,
         golesVisita: nuevosGoles.visita,
-        estado: "Finalizado" // Forzamos el cierre del partido
+        estado: "Finalizado"
       });
       alert(`✅ Resultado guardado: ${partido.local} ${nuevosGoles.local} - ${nuevosGoles.visita} ${partido.visita}`);
     } catch (error) {
@@ -79,7 +87,6 @@ export default function IngresoResultadosManual() {
     }
   };
 
-  // 🚨 MOTOR DE CARGA MASIVA DE RESULTADOS DESDE EXCEL
   const procesarExcelMasivo = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -89,7 +96,6 @@ export default function IngresoResultadosManual() {
     try {
       const data = await file.arrayBuffer();
       const workbook = XLSX.read(data);
-      // Tomamos la primera hoja del Excel ('Fechas')
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
       const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[];
 
@@ -107,10 +113,8 @@ export default function IngresoResultadosManual() {
         const golesL = row['Goles L'];
         const golesV = row['Goles V'];
 
-        // Si la fila no tiene los datos mínimos, la saltamos
         if (fecha === undefined || !local || !visita || !serie || golesL === undefined || golesV === undefined) return;
 
-        // Buscamos el partido correspondiente en la base de datos local
         const partidoBd = partidos.find(p => 
           Number(p.fechaNumero) === Number(fecha) &&
           normalizar(p.local) === normalizar(local) &&
@@ -120,7 +124,6 @@ export default function IngresoResultadosManual() {
 
         if (partidoBd) {
           encontrados++;
-          // Solo actualizamos si los goles son diferentes o no estaba finalizado
           if (partidoBd.golesLocal !== Number(golesL) || partidoBd.golesVisita !== Number(golesV) || partidoBd.estado !== "Finalizado") {
             const ref = doc(db, "asociaciones/san_fabian/partidos", partidoBd.id);
             batch.update(ref, {
@@ -137,14 +140,13 @@ export default function IngresoResultadosManual() {
         await batch.commit();
         alert(`✅ Carga masiva exitosa.\nSe escanearon ${jsonData.length} filas.\nSe emparejaron ${encontrados} partidos.\nSe actualizaron los marcadores de ${actualizados} partidos.`);
       } else {
-        alert(`ℹ️ El Excel se procesó correctamente, pero no se encontraron nuevos resultados que actualizar (todos los emparejamientos ya estaban sincronizados).`);
+        alert(`ℹ️ El Excel se procesó correctamente, pero no se encontraron nuevos resultados que actualizar.`);
       }
     } catch (error) {
       console.error(error);
       alert("Error al procesar el archivo Excel.");
     } finally {
       setProcesandoExcel(false);
-      // Reseteamos el input file para poder subir el mismo archivo de nuevo si hace falta
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
@@ -161,7 +163,7 @@ export default function IngresoResultadosManual() {
             <p className="text-slate-400 mt-2 text-xs md:text-sm">Ingreso manual rápido y actualización masiva por Excel.</p>
           </div>
           <div className="bg-emerald-500/10 px-6 py-4 rounded-2xl border border-emerald-500/20 backdrop-blur-sm text-center">
-            <span className="text-[10px] font-bold text-emerald-300 uppercase block mb-1">Partidos Jugados</span>
+            <span className="text-[10px] font-bold text-emerald-300 uppercase block mb-1">Partidos Finalizados</span>
             <p className="text-4xl font-black text-white leading-none">{partidos.filter(p => p.estado === "Finalizado").length}</p>
           </div>
         </div>
@@ -169,14 +171,28 @@ export default function IngresoResultadosManual() {
       </header>
 
       <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200">
+        
+        {/* 🚨 ZONA DE FILTROS ACTUALIZADA */}
         <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-6">
-          {/* Filtro Fecha */}
-          <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-xl border border-slate-200 w-full md:w-fit">
-            <span className="text-[10px] font-black text-slate-400 uppercase ml-2 shrink-0">Filtrar Fecha:</span>
-            <select value={filtroFecha} onChange={(e) => setFiltroFecha(e.target.value)} className="bg-white border border-slate-300 rounded-lg px-4 py-2 font-bold text-sm outline-none focus:ring-2 focus:ring-emerald-500 w-full">
-              <option value="Todas">Todo el Torneo</option>
-              {numerosDeFechas.map(num => <option key={num} value={num}>Fecha {num}</option>)}
-            </select>
+          
+          <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
+            {/* Filtro Fecha */}
+            <div className="flex items-center justify-between md:justify-start gap-3 bg-slate-50 p-2 rounded-xl border border-slate-200 w-full md:w-auto">
+              <span className="text-[10px] font-black text-slate-400 uppercase ml-2 shrink-0">Fecha:</span>
+              <select value={filtroFecha} onChange={(e) => setFiltroFecha(e.target.value)} className="bg-white border border-slate-300 rounded-lg px-3 py-2 font-bold text-sm outline-none focus:ring-2 focus:ring-emerald-500 w-full md:w-40 text-slate-700">
+                <option value="Todas">Todas</option>
+                {numerosDeFechas.map(num => <option key={num} value={num}>Fecha {num}</option>)}
+              </select>
+            </div>
+
+            {/* Filtro Serie */}
+            <div className="flex items-center justify-between md:justify-start gap-3 bg-slate-50 p-2 rounded-xl border border-slate-200 w-full md:w-auto">
+              <span className="text-[10px] font-black text-slate-400 uppercase ml-2 shrink-0">Serie:</span>
+              <select value={filtroSerie} onChange={(e) => setFiltroSerie(e.target.value)} className="bg-white border border-slate-300 rounded-lg px-3 py-2 font-bold text-sm outline-none focus:ring-2 focus:ring-emerald-500 w-full md:w-40 text-slate-700">
+                <option value="Todas">Todas</option>
+                {seriesDisponibles.map(serie => <option key={serie} value={serie}>{serie}</option>)}
+              </select>
+            </div>
           </div>
 
           {/* Botón de Carga Masiva (Excel) */}
@@ -203,7 +219,7 @@ export default function IngresoResultadosManual() {
         <div className="overflow-x-auto">
           {partidosFiltrados.length === 0 ? (
             <div className="p-16 text-center border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 font-bold">
-              No hay partidos para mostrar.
+              No hay partidos para mostrar con los filtros seleccionados.
             </div>
           ) : (
             <table className="w-full min-w-[700px] text-left border-collapse">
