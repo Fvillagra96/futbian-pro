@@ -14,9 +14,9 @@ export default function IngresoResultadosManual() {
   const { rol, authCargando } = useAuth() as any;
   const [cargandoDatos, setCargandoDatos] = useState(true);
   const [procesandoExcel, setProcesandoExcel] = useState(false);
+  const [limpiandoDatos, setLimpiandoDatos] = useState(false);
   const [partidos, setPartidos] = useState<Partido[]>([]);
   
-  // 🚨 NUEVO: Estados para los filtros
   const [filtroFecha, setFiltroFecha] = useState<string>("Todas");
   const [filtroSerie, setFiltroSerie] = useState<string>("Todas");
   
@@ -47,11 +47,9 @@ export default function IngresoResultadosManual() {
     return () => unsubP();
   }, [authCargando]);
 
-  // 🚨 NUEVO: Extraemos fechas y series únicas para llenar los selectores
   const numerosDeFechas = useMemo(() => Array.from(new Set(partidos.map(p => p.fechaNumero))).sort((a, b) => b - a), [partidos]);
   const seriesDisponibles = useMemo(() => Array.from(new Set(partidos.map(p => p.serie))).sort(), [partidos]);
   
-  // 🚨 NUEVO: Lógica de doble filtrado (Fecha + Serie)
   const partidosFiltrados = useMemo(() => {
     return partidos.filter(p => {
       const coincideFecha = filtroFecha === "Todas" || p.fechaNumero === Number(filtroFecha);
@@ -84,6 +82,46 @@ export default function IngresoResultadosManual() {
       alert("Error al guardar el resultado.");
     } finally {
       setGuardandoId(null);
+    }
+  };
+
+  // 🚨 NUEVA FUNCIÓN: Limpiar resultados masivamente
+  const limpiarResultadosVisibles = async () => {
+    const partidosBorrables = partidosFiltrados.filter(p => p.estado === "Finalizado" || p.golesLocal > 0 || p.golesVisita > 0);
+
+    if (partidosBorrables.length === 0) {
+      return alert("No hay resultados ingresados en esta vista para limpiar.");
+    }
+
+    const mensajeAdvertencia = `⚠️ ZONA DE PELIGRO ⚠️\n\n¿Estás absolutamente seguro de que deseas BORRAR los resultados de los ${partidosBorrables.length} partidos que estás viendo en pantalla?\n\nVolverán al estado "Programado" con marcador 0-0. Esta acción no se puede deshacer.`;
+    
+    if (!confirm(mensajeAdvertencia)) return;
+
+    setLimpiandoDatos(true);
+    try {
+      const batch = writeBatch(db);
+      
+      // Actualizamos estado de BD y también preparamos actualización del estado local de inputs
+      const resetInputs = { ...edicionGoles };
+      
+      partidosBorrables.forEach(p => {
+        const ref = doc(db, "asociaciones/san_fabian/partidos", p.id);
+        batch.update(ref, {
+          golesLocal: 0,
+          golesVisita: 0,
+          estado: "Programado"
+        });
+        resetInputs[p.id] = { local: 0, visita: 0 };
+      });
+
+      await batch.commit();
+      setEdicionGoles(resetInputs); // Reseteamos visualmente los inputs de inmediato
+      alert(`✅ Se han limpiado y reseteado ${partidosBorrables.length} partidos correctamente.`);
+    } catch (error) {
+      console.error(error);
+      alert("Ocurrió un error al intentar limpiar los resultados.");
+    } finally {
+      setLimpiandoDatos(false);
     }
   };
 
@@ -172,11 +210,10 @@ export default function IngresoResultadosManual() {
 
       <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200">
         
-        {/* 🚨 ZONA DE FILTROS ACTUALIZADA */}
         <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-6">
           
+          {/* Zona de Filtros */}
           <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
-            {/* Filtro Fecha */}
             <div className="flex items-center justify-between md:justify-start gap-3 bg-slate-50 p-2 rounded-xl border border-slate-200 w-full md:w-auto">
               <span className="text-[10px] font-black text-slate-400 uppercase ml-2 shrink-0">Fecha:</span>
               <select value={filtroFecha} onChange={(e) => setFiltroFecha(e.target.value)} className="bg-white border border-slate-300 rounded-lg px-3 py-2 font-bold text-sm outline-none focus:ring-2 focus:ring-emerald-500 w-full md:w-40 text-slate-700">
@@ -185,7 +222,6 @@ export default function IngresoResultadosManual() {
               </select>
             </div>
 
-            {/* Filtro Serie */}
             <div className="flex items-center justify-between md:justify-start gap-3 bg-slate-50 p-2 rounded-xl border border-slate-200 w-full md:w-auto">
               <span className="text-[10px] font-black text-slate-400 uppercase ml-2 shrink-0">Serie:</span>
               <select value={filtroSerie} onChange={(e) => setFiltroSerie(e.target.value)} className="bg-white border border-slate-300 rounded-lg px-3 py-2 font-bold text-sm outline-none focus:ring-2 focus:ring-emerald-500 w-full md:w-40 text-slate-700">
@@ -195,8 +231,20 @@ export default function IngresoResultadosManual() {
             </div>
           </div>
 
-          {/* Botón de Carga Masiva (Excel) */}
-          <div className="w-full md:w-auto">
+          {/* 🚨 ZONA DE BOTONES DE ACCIÓN (Excel y Limpiar) */}
+          <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
+            {/* Botón Limpiar */}
+            <button 
+              onClick={limpiarResultadosVisibles}
+              disabled={limpiandoDatos}
+              className={`w-full md:w-auto px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${
+                limpiandoDatos ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-red-50 text-red-600 border border-red-200 hover:bg-red-600 hover:text-white hover:-translate-y-0.5'
+              }`}
+            >
+              {limpiandoDatos ? '🧹 Borrando...' : '🧹 Limpiar Vista'}
+            </button>
+
+            {/* Botón Excel */}
             <input 
               type="file" 
               accept=".xlsx, .xls" 
@@ -211,7 +259,7 @@ export default function IngresoResultadosManual() {
                 procesandoExcel ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 hover:-translate-y-0.5'
               }`}
             >
-              {procesandoExcel ? '⏳ Procesando Archivo...' : '📊 Subir Resultados (Excel)'}
+              {procesandoExcel ? '⏳ Procesando...' : '📊 Subir (Excel)'}
             </button>
           </div>
         </div>
