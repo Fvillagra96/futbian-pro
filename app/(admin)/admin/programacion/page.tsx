@@ -4,9 +4,11 @@ import { db } from "@/lib/firebase";
 import { collection, onSnapshot, query, orderBy, doc, deleteDoc, updateDoc, writeBatch } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
 
-// 🚨 MEJORA: Agregamos el array de series al modelo de Club para poder leerlas
 interface Club { id?: string; nombre: string; series?: string[]; }
 interface Partido { id: string; fechaNumero: number; local: string; visita: string; serie: string; cancha: string; dia: string; hora: string; estado: string; }
+
+// Interfaz para manejar múltiples enfrentamientos en el formulario
+interface Encuentro { local: string; visita: string; }
 
 export default function ModuloProgramacion() {
   const { cargando: authCargando } = useAuth() as any;
@@ -16,10 +18,15 @@ export default function ModuloProgramacion() {
   const [partidos, setPartidos] = useState<Partido[]>([]);
   
   const [fechaNumero, setFechaNumero] = useState<number>(1);
-  const [local, setLocal] = useState<string>("");
-  const [visita, setVisita] = useState<string>("");
   
-  // Estos datos ahora son opcionales, para rellenar de forma general la jornada
+  // 🚨 MEJORA: Estado para manejar hasta 4 encuentros al mismo tiempo
+  const [encuentros, setEncuentros] = useState<Encuentro[]>([
+    { local: "", visita: "" },
+    { local: "", visita: "" },
+    { local: "", visita: "" },
+    { local: "", visita: "" }
+  ]);
+  
   const [cancha, setCancha] = useState<string>("");
   const [dia, setDia] = useState<string>("");
   const [hora, setHora] = useState<string>("");
@@ -28,11 +35,18 @@ export default function ModuloProgramacion() {
     if (authCargando) return;
 
     const unsubC = onSnapshot(collection(db, "asociaciones/san_fabian/clubes"), (snap) => {
-      // 🚨 MEJORA: Traemos el objeto completo del club, incluyendo sus series
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Club[];
       const ordenados = data.sort((a, b) => a.nombre.localeCompare(b.nombre));
       setClubes(ordenados);
-      if (ordenados.length > 1) { setLocal(ordenados[0].nombre); setVisita(ordenados[1].nombre); }
+      
+      // Inicializamos el primer encuentro si hay clubes suficientes
+      if (ordenados.length > 1) { 
+        setEncuentros(prev => {
+          const nuevos = [...prev];
+          nuevos[0] = { local: ordenados[0].nombre, visita: ordenados[1].nombre };
+          return nuevos;
+        });
+      }
     });
 
     const unsubP = onSnapshot(query(collection(db, "asociaciones/san_fabian/partidos"), orderBy("fechaNumero", "desc")), (snap) => {
@@ -51,57 +65,87 @@ export default function ModuloProgramacion() {
     return grupos;
   }, [partidos]);
 
-  // 🚨 EL NUEVO MOTOR INTELIGENTE DE PROGRAMACIÓN MASIVA
+  const actualizarEncuentro = (index: number, campo: keyof Encuentro, valor: string) => {
+    const nuevosEncuentros = [...encuentros];
+    nuevosEncuentros[index][campo] = valor;
+    setEncuentros(nuevosEncuentros);
+  };
+
+  // 🚨 EL NUEVO MOTOR INTELIGENTE PARA MÚLTIPLES ENCUENTROS
   const programarJornadaMasiva = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (local === visita) return alert("El equipo local y visita no pueden ser el mismo.");
     
-    // 1. Buscamos la ficha completa de ambos clubes seleccionados
-    const clubLocalObj = clubes.find(c => c.nombre === local);
-    const clubVisitaObj = clubes.find(c => c.nombre === visita);
+    // Filtramos solo los encuentros donde se hayan seleccionado ambos equipos
+    const encuentrosValidos = encuentros.filter(enc => enc.local !== "" && enc.visita !== "");
 
-    if (!clubLocalObj || !clubVisitaObj) return alert("Error al buscar la información de los clubes.");
-
-    const seriesLocal = clubLocalObj.series || [];
-    const seriesVisita = clubVisitaObj.series || [];
-
-    // 2. Comparamos y sacamos solo las series que AMBOS clubes tienen (Match)
-    const seriesEnComun = seriesLocal.filter(s => seriesVisita.includes(s));
-
-    if (seriesEnComun.length === 0) {
-      return alert("⚠️ IMPOSIBLE PROGRAMAR: Estos clubes no tienen ninguna serie en común inscrita. Revisa el padrón de clubes en las Reglas.");
+    if (encuentrosValidos.length === 0) {
+      return alert("Debes configurar al menos un enfrentamiento con Local y Visita.");
     }
 
     try {
-      // 3. Creamos una "tanda" de operaciones para crear todos los partidos al mismo tiempo
       const batch = writeBatch(db);
       let creados = 0;
+      let resumen: string[] = [];
 
-      seriesEnComun.forEach(serieMatch => {
-        const idPartidoFormateado = `${fechaNumero}_${serieMatch}_${local}_${visita}`.replace(/\s+/g, '_').toLowerCase();
-        const docRef = doc(db, "asociaciones/san_fabian/partidos", idPartidoFormateado);
+      // Procesamos cada encuentro válido
+      for (const enc of encuentrosValidos) {
+        if (enc.local === enc.visita) {
+          return alert(`⚠️ Error: El equipo ${enc.local} no puede jugar contra sí mismo.`);
+        }
 
-        batch.set(docRef, {
-          fechaNumero: Number(fechaNumero), 
-          local, 
-          visita, 
-          serie: serieMatch, 
-          cancha: cancha || "Por definir", 
-          dia: dia || "Por definir", 
-          hora: hora || "Por definir", 
-          estado: "Programado", 
-          golesLocal: 0, 
-          golesVisita: 0, 
-          eventos: [], 
-          nomina: []
+        const clubLocalObj = clubes.find(c => c.nombre === enc.local);
+        const clubVisitaObj = clubes.find(c => c.nombre === enc.visita);
+
+        if (!clubLocalObj || !clubVisitaObj) continue;
+
+        const seriesLocal = clubLocalObj.series || [];
+        const seriesVisita = clubVisitaObj.series || [];
+
+        // Comparamos series (Match)
+        const seriesEnComun = seriesLocal.filter(s => seriesVisita.includes(s));
+
+        if (seriesEnComun.length === 0) {
+          return alert(`⚠️ IMPOSIBLE PROGRAMAR: ${enc.local} vs ${enc.visita} no tienen ninguna serie en común inscrita.`);
+        }
+
+        // Agregamos al Batch
+        seriesEnComun.forEach(serieMatch => {
+          const idPartidoFormateado = `${fechaNumero}_${serieMatch}_${enc.local}_${enc.visita}`.replace(/\s+/g, '_').toLowerCase();
+          const docRef = doc(db, "asociaciones/san_fabian/partidos", idPartidoFormateado);
+
+          batch.set(docRef, {
+            fechaNumero: Number(fechaNumero), 
+            local: enc.local, 
+            visita: enc.visita, 
+            serie: serieMatch, 
+            cancha: cancha || "Por definir", 
+            dia: dia || "Por definir", 
+            hora: hora || "Por definir", 
+            estado: "Programado", 
+            golesLocal: 0, 
+            golesVisita: 0, 
+            eventos: [], 
+            nomina: []
+          });
+          creados++;
         });
-        creados++;
-      });
 
-      // 4. Ejecutamos la subida masiva
+        resumen.push(`- ${enc.local} vs ${enc.visita} (${seriesEnComun.length} partidos)`);
+      }
+
+      // Ejecutamos la subida de todos los partidos de todos los encuentros a la vez
       await batch.commit();
       
-      alert(`✅ ¡JORNADA CREADA CON ÉXITO!\n\nSe programó el encuentro entre ${local} y ${visita}.\nSe generaron ${creados} partidos automáticamente para las series:\n- ${seriesEnComun.join("\n- ")}`);
+      alert(`✅ ¡JORNADA CREADA CON ÉXITO!\n\nSe generaron ${creados} partidos en total para los siguientes enfrentamientos:\n${resumen.join("\n")}`);
+      
+      // Opcional: Limpiar los selectores después de programar
+      setEncuentros([
+        { local: "", visita: "" },
+        { local: "", visita: "" },
+        { local: "", visita: "" },
+        { local: "", visita: "" }
+      ]);
+
     } catch (error) { 
       alert("Error al programar la jornada."); 
       console.error(error);
@@ -150,7 +194,7 @@ export default function ModuloProgramacion() {
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 sticky top-24">
             <h3 className="font-black text-slate-800 mb-6 flex items-center gap-2 border-b pb-4">
               <span className="bg-blue-100 text-blue-700 w-8 h-8 rounded-full flex items-center justify-center text-sm">⚔️</span>
-              Programar Jornada Completa
+              Programar Jornada
             </h3>
             
             <form onSubmit={programarJornadaMasiva} className="space-y-4">
@@ -159,16 +203,30 @@ export default function ModuloProgramacion() {
                 <input type="number" min="1" value={fechaNumero} onChange={e => setFechaNumero(Number(e.target.value))} className="w-full p-4 bg-slate-50 border border-slate-300 rounded-xl font-black text-center text-[#1e3a8a] text-2xl outline-none focus:ring-2 focus:ring-blue-500 transition" required />
               </div>
 
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-4 shadow-inner">
-                <div>
-                  <label className="block text-[10px] font-black text-blue-600 uppercase mb-1">Club Local</label>
-                  <select value={local} onChange={e => setLocal(e.target.value)} className="w-full p-3 bg-white border border-slate-300 rounded-lg font-bold text-sm outline-none shadow-sm">{clubes.map(c => <option key={`L-${c.nombre}`} value={c.nombre}>{c.nombre}</option>)}</select>
-                </div>
-                <div className="text-center font-black text-slate-300 text-xs italic tracking-widest">VERSUS</div>
-                <div>
-                  <label className="block text-[10px] font-black text-emerald-600 uppercase mb-1">Club Visita</label>
-                  <select value={visita} onChange={e => setVisita(e.target.value)} className="w-full p-3 bg-white border border-slate-300 rounded-lg font-bold text-sm outline-none shadow-sm">{clubes.map(c => <option key={`V-${c.nombre}`} value={c.nombre}>{c.nombre}</option>)}</select>
-                </div>
+              {/* 🚨 RENDERIZADO DINÁMICO DE LOS 4 ENCUENTROS */}
+              <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                {encuentros.map((enc, index) => (
+                  <div key={index} className="bg-slate-50 p-3 rounded-xl border border-slate-200 shadow-inner relative">
+                    <span className="absolute -top-2 -left-2 bg-slate-800 text-white text-[9px] font-black w-5 h-5 flex items-center justify-center rounded-full">
+                      {index + 1}
+                    </span>
+                    <div className="space-y-2 pt-2">
+                      <div>
+                        <select value={enc.local} onChange={e => actualizarEncuentro(index, "local", e.target.value)} className="w-full p-2 bg-white border border-slate-300 rounded-lg font-bold text-xs outline-none shadow-sm text-blue-700">
+                          <option value="">-- Local --</option>
+                          {clubes.map(c => <option key={`L-${index}-${c.nombre}`} value={c.nombre}>{c.nombre}</option>)}
+                        </select>
+                      </div>
+                      <div className="text-center font-black text-slate-300 text-[10px] italic tracking-widest">VS</div>
+                      <div>
+                        <select value={enc.visita} onChange={e => actualizarEncuentro(index, "visita", e.target.value)} className="w-full p-2 bg-white border border-slate-300 rounded-lg font-bold text-xs outline-none shadow-sm text-emerald-700">
+                          <option value="">-- Visita --</option>
+                          {clubes.map(c => <option key={`V-${index}-${c.nombre}`} value={c.nombre}>{c.nombre}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
 
               <div className="pt-4 border-t border-slate-100 space-y-3">
@@ -181,8 +239,8 @@ export default function ModuloProgramacion() {
               </div>
 
               <button type="submit" className="w-full py-4 bg-[#1e3a8a] text-white rounded-xl font-black shadow-lg hover:bg-blue-800 transition uppercase tracking-widest text-xs mt-6 flex flex-col items-center gap-1">
-                <span>Generar Jornada Automática</span>
-                <span className="text-[9px] font-bold text-blue-200 lowercase tracking-normal">Calculando match de series...</span>
+                <span>Generar Jornada Múltiple</span>
+                <span className="text-[9px] font-bold text-blue-200 lowercase tracking-normal">Procesando todos los partidos...</span>
               </button>
             </form>
           </div>
