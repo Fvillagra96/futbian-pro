@@ -1,8 +1,9 @@
 'use client'
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { db } from "@/lib/firebase";
-import { collection, onSnapshot, query, orderBy, doc, updateDoc } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, doc, updateDoc, writeBatch } from "firebase/firestore";
 import { useAuth } from "@/context/AuthContext";
+import * as XLSX from "xlsx";
 
 interface Partido { 
   id: string; fechaNumero: number; local: string; visita: string; 
@@ -12,10 +13,13 @@ interface Partido {
 export default function IngresoResultadosManual() {
   const { rol, authCargando } = useAuth() as any;
   const [cargandoDatos, setCargandoDatos] = useState(true);
+  const [procesandoExcel, setProcesandoExcel] = useState(false);
   const [partidos, setPartidos] = useState<Partido[]>([]);
   
   const [filtroFecha, setFiltroFecha] = useState<string>("Todas");
   const [guardandoId, setGuardandoId] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Estado local para los inputs de goles antes de guardarlos
   const [edicionGoles, setEdicionGoles] = useState<Record<string, { local: number, visita: number }>>({});
@@ -75,6 +79,76 @@ export default function IngresoResultadosManual() {
     }
   };
 
+  // 🚨 MOTOR DE CARGA MASIVA DE RESULTADOS DESDE EXCEL
+  const procesarExcelMasivo = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setProcesandoExcel(true);
+
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data);
+      // Tomamos la primera hoja del Excel ('Fechas')
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[];
+
+      const normalizar = (str: any) => String(str || "").trim().toLowerCase();
+      
+      const batch = writeBatch(db);
+      let encontrados = 0;
+      let actualizados = 0;
+
+      jsonData.forEach(row => {
+        const fecha = row['Fecha'];
+        const local = row['Club L'];
+        const visita = row['Club v'];
+        const serie = row['Serie'];
+        const golesL = row['Goles L'];
+        const golesV = row['Goles V'];
+
+        // Si la fila no tiene los datos mínimos, la saltamos
+        if (fecha === undefined || !local || !visita || !serie || golesL === undefined || golesV === undefined) return;
+
+        // Buscamos el partido correspondiente en la base de datos local
+        const partidoBd = partidos.find(p => 
+          Number(p.fechaNumero) === Number(fecha) &&
+          normalizar(p.local) === normalizar(local) &&
+          normalizar(p.visita) === normalizar(visita) &&
+          normalizar(p.serie) === normalizar(serie)
+        );
+
+        if (partidoBd) {
+          encontrados++;
+          // Solo actualizamos si los goles son diferentes o no estaba finalizado
+          if (partidoBd.golesLocal !== Number(golesL) || partidoBd.golesVisita !== Number(golesV) || partidoBd.estado !== "Finalizado") {
+            const ref = doc(db, "asociaciones/san_fabian/partidos", partidoBd.id);
+            batch.update(ref, {
+              golesLocal: Number(golesL),
+              golesVisita: Number(golesV),
+              estado: "Finalizado"
+            });
+            actualizados++;
+          }
+        }
+      });
+
+      if (actualizados > 0) {
+        await batch.commit();
+        alert(`✅ Carga masiva exitosa.\nSe escanearon ${jsonData.length} filas.\nSe emparejaron ${encontrados} partidos.\nSe actualizaron los marcadores de ${actualizados} partidos.`);
+      } else {
+        alert(`ℹ️ El Excel se procesó correctamente, pero no se encontraron nuevos resultados que actualizar (todos los emparejamientos ya estaban sincronizados).`);
+      }
+    } catch (error) {
+      console.error(error);
+      alert("Error al procesar el archivo Excel.");
+    } finally {
+      setProcesandoExcel(false);
+      // Reseteamos el input file para poder subir el mismo archivo de nuevo si hace falta
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
   if (authCargando || cargandoDatos) return <div className="p-20 text-center font-bold text-[#1e3a8a] animate-pulse">Cargando panel de resultados...</div>;
 
   return (
@@ -84,7 +158,7 @@ export default function IngresoResultadosManual() {
           <div>
             <h2 className="text-emerald-400 font-black uppercase tracking-[0.2em] text-[10px] md:text-xs mb-2">Auditoría y Planillaje</h2>
             <h1 className="text-3xl md:text-5xl font-black tracking-tighter">RESULTADOS</h1>
-            <p className="text-slate-400 mt-2 text-xs md:text-sm">Ingreso manual rápido y corrección de marcadores.</p>
+            <p className="text-slate-400 mt-2 text-xs md:text-sm">Ingreso manual rápido y actualización masiva por Excel.</p>
           </div>
           <div className="bg-emerald-500/10 px-6 py-4 rounded-2xl border border-emerald-500/20 backdrop-blur-sm text-center">
             <span className="text-[10px] font-bold text-emerald-300 uppercase block mb-1">Partidos Jugados</span>
@@ -95,12 +169,35 @@ export default function IngresoResultadosManual() {
       </header>
 
       <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200">
-        <div className="flex items-center gap-3 mb-6 bg-slate-50 p-2 rounded-xl border border-slate-200 w-full md:w-fit">
-          <span className="text-[10px] font-black text-slate-400 uppercase ml-2 shrink-0">Filtrar Fecha:</span>
-          <select value={filtroFecha} onChange={(e) => setFiltroFecha(e.target.value)} className="bg-white border border-slate-300 rounded-lg px-4 py-2 font-bold text-sm outline-none focus:ring-2 focus:ring-emerald-500 w-full">
-            <option value="Todas">Todo el Torneo</option>
-            {numerosDeFechas.map(num => <option key={num} value={num}>Fecha {num}</option>)}
-          </select>
+        <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-6">
+          {/* Filtro Fecha */}
+          <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-xl border border-slate-200 w-full md:w-fit">
+            <span className="text-[10px] font-black text-slate-400 uppercase ml-2 shrink-0">Filtrar Fecha:</span>
+            <select value={filtroFecha} onChange={(e) => setFiltroFecha(e.target.value)} className="bg-white border border-slate-300 rounded-lg px-4 py-2 font-bold text-sm outline-none focus:ring-2 focus:ring-emerald-500 w-full">
+              <option value="Todas">Todo el Torneo</option>
+              {numerosDeFechas.map(num => <option key={num} value={num}>Fecha {num}</option>)}
+            </select>
+          </div>
+
+          {/* Botón de Carga Masiva (Excel) */}
+          <div className="w-full md:w-auto">
+            <input 
+              type="file" 
+              accept=".xlsx, .xls" 
+              ref={fileInputRef} 
+              className="hidden" 
+              onChange={procesarExcelMasivo} 
+            />
+            <button 
+              onClick={() => fileInputRef.current?.click()} 
+              disabled={procesandoExcel}
+              className={`w-full md:w-auto px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest shadow-md transition-all flex items-center justify-center gap-2 ${
+                procesandoExcel ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 hover:-translate-y-0.5'
+              }`}
+            >
+              {procesandoExcel ? '⏳ Procesando Archivo...' : '📊 Subir Resultados (Excel)'}
+            </button>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
