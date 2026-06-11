@@ -1,10 +1,11 @@
 'use client'
-import { useState, useEffect, useMemo, useRef } from "react"; // 1. Importar useRef
+// 1. Importar useRef y useMemo
+import { useState, useEffect, useMemo, useRef } from "react"; 
 import { db, auth } from "@/lib/firebase";
 import { collection, onSnapshot, query, doc, getDoc } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
-// 2. Importar la librería (requiere previa instalación: npm install html-to-image)
-import { toPng } from 'html-to-image'; 
+// 2. Importar la librería necesaria
+import { toPng } from 'html-to-image';
 
 interface Partido { id: string; estado: string; serie: string; local: string; visita: string; golesLocal: number; golesVisita: number; }
 interface Estadisticas { club: string; PJ: number; PG: number; PE: number; PP: number; GF: number; GC: number; DG: number; PTS: number; }
@@ -19,14 +20,14 @@ export default function HomePublico() {
   const [clubes, setClubes] = useState<Club[]>([]);
   const [infoAsoc, setInfoAsoc] = useState<AsociacionInfo>({});
 
-  // 3. Crear un mapa de referencias para las tablas de las series
+  // 3. Crear el mapa de referencias para las tablas de las series
   const tablaRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // 1. Verificación de Seguridad y Carga de Datos
   useEffect(() => {
     const unsubAuth = onAuthStateChanged(auth, async (user) => {
       if (user?.email) {
-        // OJO: Asegúrate que esta ruta en Firestore sea correcta según tu implementación de seguridad
+        // NOTA DE SEGURIDAD: Asegúrate de que esta ruta en Firestore sea correcta
         const docSnap = await getDoc(doc(db, "asociaciones/san_fabian/usuarios_permisos", user.email));
         if (docSnap.exists()) setRolUsuario(docSnap.data().rol);
       } else {
@@ -93,7 +94,10 @@ export default function HomePublico() {
     return { tablaPorSerie: tablaSeriesOrdenada, tablaGeneral: ordenarTabla(general) };
   }, [partidos]);
 
-  // 4. Función Lógica para descargar la imagen
+  // 4. Lógica de verificación de permisos
+  const esGestion = useMemo(() => rolUsuario === 'admin' || rolUsuario === 'delegado', [rolUsuario]);
+
+  // 5. Función Lógica para descargar la imagen
   const descargarTablaComoImagen = async (serieNombre: string) => {
     const nodo = tablaRefs.current[serieNombre];
     
@@ -103,22 +107,19 @@ export default function HomePublico() {
     }
 
     try {
-      // Opciones para mejorar la calidad y apariencia
-      const opciones = {
-        quality: 0.95,
-        backgroundColor: '#ffffff', // Fondo blanco para que no salga transparente
+      const dataUrl = await toPng(nodo, {
+        backgroundColor: '#ffffff', // Asegurar fondo blanco para que no salga transparente
+        pixelRatio: 2, // Aumentar resolución (Retina)
         style: {
           borderRadius: '0px' // Opcional: quitar bordes redondeados en la foto
         },
-        // Corrección para Tailwind: a veces las sombras o bordes se cortan, añadimos un pequeño padding
-        pixelRatio: 2, // Aumenta la resolución (Retina)
-      };
-
-      const dataUrl = await toPng(nodo, opciones);
+      });
       
-      // Crear un elemento link temporal para gatillar la descarga
       const link = document.createElement('a');
-      link.download = `tabla-posiciones-${serieNombre.toLowerCase().replace(/ /g, '-')}-${new Date().toISOString().slice(0,10)}.png`;
+      // Crear nombre de archivo dinámico
+      const sanitizedSerie = serieNombre.toLowerCase().replace(/ /g, '-');
+      const date = new Date().toISOString().slice(0, 10);
+      link.download = `tabla-${sanitizedSerie}-${date}.png`;
       link.href = dataUrl;
       link.click();
     } catch (error) {
@@ -126,9 +127,6 @@ export default function HomePublico() {
       alert('Hubo un error al generar la imagen. Intenta nuevamente.');
     }
   };
-
-  // Helper para verificar permisos
-  const esGestion = useMemo(() => rolUsuario === 'admin' || rolUsuario === 'delegado', [rolUsuario]);
 
   if (cargando) return <div className="p-20 text-center font-bold text-[#1e3a8a] animate-pulse">Cargando estadísticas oficiales...</div>;
 
@@ -222,18 +220,19 @@ export default function HomePublico() {
         ) : (
           <div className="grid grid-cols-1 gap-10">
             {Object.entries(tablaPorSerie).sort().map(([serie, stats]) => (
-              // 5. Asignar la referencia al contenedor principal de la serie
-              <div key={serie} ref={el => tablaRefs.current[serie] = el} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+              // 6. Asignar la referencia corregida al contenedor principal de la serie
+              // LA SOLUCIÓN AL ERROR ES ESTA SINTAXIS: ref={(el) => { ... }}
+              <div key={serie} ref={(el) => { tablaRefs.current[serie] = el; }} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                 
-                {/* Cabecera de la Serie modificada para incluir botón */}
+                {/* Cabecera de la Serie modificada para incluir botón y Flexbox layout */}
                 <div className="bg-[#1e3a8a] p-4 md:p-5 text-white flex items-center justify-between gap-4">
                   <h3 className="font-black text-xl tracking-widest uppercase">SERIE {serie}</h3>
                   
-                  {/* 6. Botón de descarga condicional */}
+                  {/* 7. Botón de descarga condicional */}
                   {esGestion && (
                     <button 
                       onClick={() => descargarTablaComoImagen(serie)}
-                      className="bg-white/10 hover:bg-white/20 text-white border border-white/20 text-xs font-bold px-4 py-2 rounded-lg transition flex items-center gap-2 backdrop-blur-sm"
+                      className="bg-white/10 hover:bg-white/20 text-white border border-white/20 text-xs font-bold px-4 py-2 rounded-lg transition flex items-center gap-2 backdrop-blur-sm whitespace-nowrap"
                     >
                       <span>📷</span>
                       Descargar Imagen
@@ -290,7 +289,6 @@ export default function HomePublico() {
                     </tbody>
                   </table>
                 </div>
-                {/* Footer de la tarjeta con info de la asociación para la foto */}
                 <div className="bg-slate-50 p-3 text-center border-t border-slate-100 flex justify-between items-center px-5">
                   <p className="text-[10px] font-bold text-slate-400 uppercase">{infoAsoc.nombre} - Torneo 2026</p>
                   {infoAsoc.logoUrl && <img src={infoAsoc.logoUrl} alt="logo" className="h-4 opacity-50" />}
