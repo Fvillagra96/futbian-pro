@@ -234,7 +234,7 @@ export default function HomePublico() {
                   </table>
                 </div>
                 <div className="bg-slate-50 p-3 text-center border-t border-slate-100">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase">Clasifican los 4 primeros a la Liguilla</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase"></p>
                 </div>
               </div>
             ))}
