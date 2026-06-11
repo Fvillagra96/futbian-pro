@@ -1,10 +1,8 @@
 'use client'
-// 1. Importar useRef y useMemo
 import { useState, useEffect, useMemo, useRef } from "react"; 
 import { db, auth } from "@/lib/firebase";
 import { collection, onSnapshot, query, doc, getDoc } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
-// 2. Importar la librería necesaria
 import { toPng } from 'html-to-image';
 
 interface Partido { id: string; estado: string; serie: string; local: string; visita: string; golesLocal: number; golesVisita: number; }
@@ -20,14 +18,13 @@ export default function HomePublico() {
   const [clubes, setClubes] = useState<Club[]>([]);
   const [infoAsoc, setInfoAsoc] = useState<AsociacionInfo>({});
 
-  // 3. Crear el mapa de referencias para las tablas de las series
+  // Crear el mapa de referencias para las tablas de las series
   const tablaRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // 1. Verificación de Seguridad y Carga de Datos
   useEffect(() => {
     const unsubAuth = onAuthStateChanged(auth, async (user) => {
       if (user?.email) {
-        // NOTA DE SEGURIDAD: Asegúrate de que esta ruta en Firestore sea correcta
         const docSnap = await getDoc(doc(db, "asociaciones/san_fabian/usuarios_permisos", user.email));
         if (docSnap.exists()) setRolUsuario(docSnap.data().rol);
       } else {
@@ -116,7 +113,6 @@ export default function HomePublico() {
       });
       
       const link = document.createElement('a');
-      // Crear nombre de archivo dinámico
       const sanitizedSerie = serieNombre.toLowerCase().replace(/ /g, '-');
       const date = new Date().toISOString().slice(0, 10);
       link.download = `tabla-${sanitizedSerie}-${date}.png`;
@@ -220,78 +216,84 @@ export default function HomePublico() {
         ) : (
           <div className="grid grid-cols-1 gap-10">
             {Object.entries(tablaPorSerie).sort().map(([serie, stats]) => (
-              // 6. Asignar la referencia corregida al contenedor principal de la serie
-              // LA SOLUCIÓN AL ERROR ES ESTA SINTAXIS: ref={(el) => { ... }}
-              <div key={serie} ref={(el) => { tablaRefs.current[serie] = el; }} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+              
+              <div key={serie} className="flex flex-col gap-2">
                 
-                {/* Cabecera de la Serie modificada para incluir botón y Flexbox layout */}
-                <div className="bg-[#1e3a8a] p-4 md:p-5 text-white flex items-center justify-between gap-4">
-                  <h3 className="font-black text-xl tracking-widest uppercase">SERIE {serie}</h3>
-                  
-                  {/* 7. Botón de descarga condicional */}
-                  {esGestion && (
+                {/* Botón de descarga condicional (MOVIDO AFUERA DE LA FOTO) */}
+                {esGestion && (
+                  <div className="flex justify-end px-2">
                     <button 
                       onClick={() => descargarTablaComoImagen(serie)}
-                      className="bg-white/10 hover:bg-white/20 text-white border border-white/20 text-xs font-bold px-4 py-2 rounded-lg transition flex items-center gap-2 backdrop-blur-sm whitespace-nowrap"
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm text-xs font-bold px-4 py-2 rounded-lg transition flex items-center gap-2"
                     >
                       <span>📷</span>
-                      Descargar Imagen
+                      Descargar Tabla Serie {serie}
                     </button>
-                  )}
-                </div>
-                
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse min-w-[700px]">
-                    <thead>
-                      <tr className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-widest border-b border-slate-200">
-                        <th className="p-4 font-black text-center w-12">#</th>
-                        <th className="p-4 font-bold">Club y Redes</th>
-                        <th className="p-4 font-bold text-center" title="Partidos Jugados">PJ</th>
-                        <th className="p-4 font-bold text-center" title="Partidos Ganados">PG</th>
-                        <th className="p-4 font-bold text-center" title="Partidos Empatados">PE</th>
-                        <th className="p-4 font-bold text-center" title="Partidos Perdidos">PP</th>
-                        <th className="p-4 font-bold text-center text-slate-400" title="Goles a Favor">GF</th>
-                        <th className="p-4 font-bold text-center text-slate-400" title="Goles en Contra">GC</th>
-                        <th className="p-4 font-bold text-center" title="Diferencia de Goles">DIF</th>
-                        <th className="p-4 font-black text-center text-[#1e3a8a] text-sm">PTS</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {stats.map((stat, i) => {
-                        const clubInfo = clubes.find(c => c.nombre === stat.club);
-                        return (
-                          <tr key={`${serie}-${stat.club}`} className={`hover:bg-slate-50 transition-colors ${i < 4 ? 'bg-blue-50/30' : ''}`}>
-                            <td className="p-4 text-center font-black text-slate-400">{i + 1}</td>
-                            <td className="p-4">
-                              <div className="flex items-center gap-3">
-                                <span className="font-black text-slate-800 uppercase text-xs md:text-sm">{stat.club}</span>
-                                <div className="flex items-center gap-1.5 shrink-0">
-                                  {clubInfo?.facebook && (
-                                    <a href={clubInfo.facebook} target="_blank" rel="noopener noreferrer" className="text-[9px] text-white bg-blue-600 px-1.5 py-0.5 rounded shadow-sm hover:bg-blue-700 transition" title="Facebook">FB</a>
-                                  )}
-                                  {clubInfo?.instagram && (
-                                    <a href={clubInfo.instagram} target="_blank" rel="noopener noreferrer" className="text-[9px] text-white bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600 px-1.5 py-0.5 rounded shadow-sm hover:opacity-80 transition" title="Instagram">IG</a>
-                                  )}
+                  </div>
+                )}
+
+                {/* Contenedor que será convertido a imagen */}
+                <div ref={(el) => { tablaRefs.current[serie] = el; }} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                  
+                  {/* Cabecera de la Serie */}
+                  <div className="bg-[#1e3a8a] p-4 md:p-5 text-white flex items-center justify-center">
+                    <h3 className="font-black text-xl tracking-widest uppercase">SERIE {serie}</h3>
+                  </div>
+                  
+                  {/* Tabla con clases de Tailwind para ocultar el scrollbar */}
+                  <div className="overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                    <table className="w-full text-left border-collapse min-w-[700px]">
+                      <thead>
+                        <tr className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-widest border-b border-slate-200">
+                          <th className="p-4 font-black text-center w-12">#</th>
+                          <th className="p-4 font-bold">Club y Redes</th>
+                          <th className="p-4 font-bold text-center" title="Partidos Jugados">PJ</th>
+                          <th className="p-4 font-bold text-center" title="Partidos Ganados">PG</th>
+                          <th className="p-4 font-bold text-center" title="Partidos Empatados">PE</th>
+                          <th className="p-4 font-bold text-center" title="Partidos Perdidos">PP</th>
+                          <th className="p-4 font-bold text-center text-slate-400" title="Goles a Favor">GF</th>
+                          <th className="p-4 font-bold text-center text-slate-400" title="Goles en Contra">GC</th>
+                          <th className="p-4 font-bold text-center" title="Diferencia de Goles">DIF</th>
+                          <th className="p-4 font-black text-center text-[#1e3a8a] text-sm">PTS</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {stats.map((stat, i) => {
+                          const clubInfo = clubes.find(c => c.nombre === stat.club);
+                          return (
+                            <tr key={`${serie}-${stat.club}`} className={`hover:bg-slate-50 transition-colors ${i < 4 ? 'bg-blue-50/30' : ''}`}>
+                              <td className="p-4 text-center font-black text-slate-400">{i + 1}</td>
+                              <td className="p-4">
+                                <div className="flex items-center gap-3">
+                                  <span className="font-black text-slate-800 uppercase text-xs md:text-sm">{stat.club}</span>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    {clubInfo?.facebook && (
+                                      <a href={clubInfo.facebook} target="_blank" rel="noopener noreferrer" className="text-[9px] text-white bg-blue-600 px-1.5 py-0.5 rounded shadow-sm hover:bg-blue-700 transition" title="Facebook">FB</a>
+                                    )}
+                                    {clubInfo?.instagram && (
+                                      <a href={clubInfo.instagram} target="_blank" rel="noopener noreferrer" className="text-[9px] text-white bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600 px-1.5 py-0.5 rounded shadow-sm hover:opacity-80 transition" title="Instagram">IG</a>
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
-                            </td>
-                            <td className="p-4 text-center font-bold text-slate-600">{stat.PJ}</td>
-                            <td className="p-4 text-center font-bold text-emerald-600">{stat.PG}</td>
-                            <td className="p-4 text-center font-bold text-slate-400">{stat.PE}</td>
-                            <td className="p-4 text-center font-bold text-red-400">{stat.PP}</td>
-                            <td className="p-4 text-center font-bold text-slate-400">{stat.GF}</td>
-                            <td className="p-4 text-center font-bold text-slate-400">{stat.GC}</td>
-                            <td className="p-4 text-center font-bold text-slate-600">{stat.DG > 0 ? `+${stat.DG}` : stat.DG}</td>
-                            <td className="p-4 text-center font-black text-xl text-[#1e3a8a]">{stat.PTS}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="bg-slate-50 p-3 text-center border-t border-slate-100 flex justify-between items-center px-5">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase">{infoAsoc.nombre} - Torneo 2026</p>
-                  {infoAsoc.logoUrl && <img src={infoAsoc.logoUrl} alt="logo" className="h-4 opacity-50" />}
+                              </td>
+                              <td className="p-4 text-center font-bold text-slate-600">{stat.PJ}</td>
+                              <td className="p-4 text-center font-bold text-emerald-600">{stat.PG}</td>
+                              <td className="p-4 text-center font-bold text-slate-400">{stat.PE}</td>
+                              <td className="p-4 text-center font-bold text-red-400">{stat.PP}</td>
+                              <td className="p-4 text-center font-bold text-slate-400">{stat.GF}</td>
+                              <td className="p-4 text-center font-bold text-slate-400">{stat.GC}</td>
+                              <td className="p-4 text-center font-bold text-slate-600">{stat.DG > 0 ? `+${stat.DG}` : stat.DG}</td>
+                              <td className="p-4 text-center font-black text-xl text-[#1e3a8a]">{stat.PTS}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="bg-slate-50 p-3 text-center border-t border-slate-100 flex justify-between items-center px-5">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">{infoAsoc.nombre} - Torneo 2026</p>
+                    {infoAsoc.logoUrl && <img src={infoAsoc.logoUrl} alt="logo" className="h-4 opacity-50" />}
+                  </div>
                 </div>
               </div>
             ))}
