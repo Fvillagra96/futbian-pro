@@ -18,10 +18,8 @@ export default function HomePublico() {
   const [clubes, setClubes] = useState<Club[]>([]);
   const [infoAsoc, setInfoAsoc] = useState<AsociacionInfo>({});
 
-  // Crear el mapa de referencias para las tablas de las series
   const tablaRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  // 1. Verificación de Seguridad y Carga de Datos
   useEffect(() => {
     const unsubAuth = onAuthStateChanged(auth, async (user) => {
       if (user?.email) {
@@ -42,14 +40,13 @@ export default function HomePublico() {
 
     const unsubP = onSnapshot(query(collection(db, "asociaciones/san_fabian/partidos")), (snap) => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Partido[];
-      setPartidos(data.filter(p => p.estado === "Finalizado")); // Solo calculamos con actas cerradas
+      setPartidos(data.filter(p => p.estado === "Finalizado")); 
       setCargando(false);
     });
 
     return () => { unsubAuth(); unsubAsoc(); unsubC(); unsubP(); };
   }, []);
 
-  // 2. Motor de Cálculo de Estadísticas Automáticas
   const { tablaPorSerie, tablaGeneral } = useMemo(() => {
     const series: Record<string, Record<string, Estadisticas>> = {};
     const general: Record<string, Estadisticas> = {};
@@ -66,11 +63,9 @@ export default function HomePublico() {
       else if (golesF === golesC) { pts = 1; pe = 1; }
       else { pp = 1; }
 
-      // Suma a la serie
       const s = series[serie][club];
       s.PJ++; s.PG += pg; s.PE += pe; s.PP += pp; s.GF += golesF; s.GC += golesC; s.DG = s.GF - s.GC; s.PTS += pts;
 
-      // Suma a la General
       const g = general[club];
       g.PJ++; g.PG += pg; g.PE += pe; g.PP += pp; g.GF += golesF; g.GC += golesC; g.DG = g.GF - g.GC; g.PTS += pts;
     };
@@ -82,7 +77,6 @@ export default function HomePublico() {
       sumarStats(p.visita, p.serie, p.golesVisita || 0, p.golesLocal || 0);
     });
 
-    // Ordenar tablas: Puntos > Diferencia de Goles > Goles a Favor
     const ordenarTabla = (tabla: Record<string, Estadisticas>) => Object.values(tabla).sort((a, b) => b.PTS - a.PTS || b.DG - a.DG || b.GF - a.GF);
 
     const tablaSeriesOrdenada: Record<string, Estadisticas[]> = {};
@@ -91,10 +85,9 @@ export default function HomePublico() {
     return { tablaPorSerie: tablaSeriesOrdenada, tablaGeneral: ordenarTabla(general) };
   }, [partidos]);
 
-  // 4. Lógica de verificación de permisos
   const esGestion = useMemo(() => rolUsuario === 'admin' || rolUsuario === 'delegado', [rolUsuario]);
 
-  // 5. Función Lógica para descargar la imagen
+  // FUNCIÓN ACTUALIZADA: Generación de 16:9 con Canvas
   const descargarTablaComoImagen = async (serieNombre: string) => {
     const nodo = tablaRefs.current[serieNombre];
     
@@ -104,20 +97,60 @@ export default function HomePublico() {
     }
 
     try {
+      // 1. Capturar la tabla tal cual está en la web
       const dataUrl = await toPng(nodo, {
-        backgroundColor: '#ffffff', // Asegurar fondo blanco para que no salga transparente
-        pixelRatio: 2, // Aumentar resolución (Retina)
-        style: {
-          borderRadius: '0px' // Opcional: quitar bordes redondeados en la foto
-        },
+        backgroundColor: '#ffffff',
+        pixelRatio: 2, 
+        style: { borderRadius: '0px', margin: '0' },
       });
       
-      const link = document.createElement('a');
-      const sanitizedSerie = serieNombre.toLowerCase().replace(/ /g, '-');
-      const date = new Date().toISOString().slice(0, 10);
-      link.download = `tabla-${sanitizedSerie}-${date}.png`;
-      link.href = dataUrl;
-      link.click();
+      // 2. Cargarla en memoria para manipularla
+      const img = new window.Image();
+      img.src = dataUrl;
+      
+      img.onload = () => {
+        const imgW = img.width;
+        const imgH = img.height;
+
+        // 3. Matemáticas para forzar 16:9
+        const targetRatio = 16 / 9;
+        let canvasW = imgW;
+        let canvasH = imgH;
+
+        if (imgW / imgH < targetRatio) {
+          // Si la tabla es alta (muchos equipos), calculamos márgenes a los lados
+          canvasW = imgH * targetRatio;
+        } else {
+          // Si la tabla es ancha (pocos equipos), calculamos márgenes arriba/abajo
+          canvasH = imgW / targetRatio;
+        }
+
+        // 4. Crear el lienzo invisible
+        const canvas = document.createElement('canvas');
+        canvas.width = canvasW;
+        canvas.height = canvasH;
+        const ctx = canvas.getContext('2d');
+
+        if (ctx) {
+          // Rellenar el fondo de blanco para que no se note la unión
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvasW, canvasH);
+
+          // Pegar la tabla perfectamente en el centro
+          const x = (canvasW - imgW) / 2;
+          const y = (canvasH - imgH) / 2;
+          ctx.drawImage(img, x, y, imgW, imgH);
+
+          // 5. Descargar la imagen final 16:9
+          const finalDataUrl = canvas.toDataURL('image/png');
+          const link = document.createElement('a');
+          const sanitizedSerie = serieNombre.toLowerCase().replace(/ /g, '-');
+          const date = new Date().toISOString().slice(0, 10);
+          link.download = `tabla-${sanitizedSerie}-${date}.png`;
+          link.href = finalDataUrl;
+          link.click();
+        }
+      };
     } catch (error) {
       console.error('Error generando la imagen:', error);
       alert('Hubo un error al generar la imagen. Intenta nuevamente.');
@@ -129,7 +162,6 @@ export default function HomePublico() {
   return (
     <div className="max-w-6xl mx-auto space-y-10 animate-in fade-in duration-500 pb-12">
       
-      {/* BANNER PRINCIPAL */}
       <header className="bg-slate-900 rounded-3xl p-8 md:p-12 shadow-xl text-white relative overflow-hidden flex flex-col items-center text-center border-b-4 border-emerald-500">
         <div className="relative z-10 space-y-4">
           {infoAsoc.logoUrl && <img src={infoAsoc.logoUrl} alt="Logo" className="w-24 h-24 mx-auto object-contain bg-white/10 p-2 rounded-full backdrop-blur-sm" />}
@@ -145,7 +177,6 @@ export default function HomePublico() {
         <div className="absolute right-[-20px] top-[-40px] opacity-10 text-[200px] pointer-events-none">⚽</div>
       </header>
 
-      {/* 🔴 REGLA 1: TABLA GENERAL RESTRINGIDA SOLO PARA ADMIN Y DELEGADOS */}
       {esGestion && tablaGeneral.length > 0 && (
         <section className="bg-white p-4 md:p-8 rounded-3xl shadow-sm border border-emerald-200">
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-6 border-b pb-4 border-slate-100 gap-4">
@@ -202,7 +233,6 @@ export default function HomePublico() {
         </section>
       )}
 
-      {/* 🔴 REGLA 2 Y 3: TABLA POR SERIES */}
       <section className="space-y-8">
         <div className="text-center">
           <h2 className="text-2xl md:text-3xl font-black text-slate-800 tracking-tight">POSICIONES POR SERIE</h2>
@@ -219,7 +249,6 @@ export default function HomePublico() {
               
               <div key={serie} className="flex flex-col gap-2">
                 
-                {/* Botón de descarga condicional (MOVIDO AFUERA DE LA FOTO) */}
                 {esGestion && (
                   <div className="flex justify-end px-2">
                     <button 
@@ -232,15 +261,12 @@ export default function HomePublico() {
                   </div>
                 )}
 
-                {/* Contenedor que será convertido a imagen */}
                 <div ref={(el) => { tablaRefs.current[serie] = el; }} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                   
-                  {/* Cabecera de la Serie */}
                   <div className="bg-[#1e3a8a] p-4 md:p-5 text-white flex items-center justify-center">
                     <h3 className="font-black text-xl tracking-widest uppercase">SERIE {serie}</h3>
                   </div>
                   
-                  {/* Tabla con clases de Tailwind para ocultar el scrollbar */}
                   <div className="overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                     <table className="w-full text-left border-collapse min-w-[700px]">
                       <thead>
