@@ -8,11 +8,10 @@ import * as XLSX from "xlsx";
 interface Partido { 
   id: string; fechaNumero: number; local: string; visita: string; 
   serie: string; estado: string; golesLocal: number; golesVisita: number; 
-  // 🚨 NUEVOS CAMPOS AGREGADOS:
   quitaPuntosLocal?: boolean; quitaPuntosVisita?: boolean;
+  puntosLocal?: number; puntosVisita?: number; // Guardaremos los puntos finales aquí
 }
 
-// 🚨 NUEVA INTERFAZ PARA EL ESTADO DE EDICIÓN
 interface EdicionPartido {
   local: number;
   visita: number;
@@ -34,7 +33,6 @@ export default function IngresoResultadosManual() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 🚨 ESTADO ACTUALIZADO PARA SOPORTAR LA QUITA DE PUNTOS
   const [edicionGoles, setEdicionGoles] = useState<Record<string, EdicionPartido>>({});
 
   useEffect(() => {
@@ -82,7 +80,6 @@ export default function IngresoResultadosManual() {
     }));
   };
 
-  // 🚨 NUEVA FUNCIÓN: Manejar el cambio de los checkboxes de quita de puntos
   const manejarQuitaPuntos = (id: string, equipo: 'local' | 'visita', valor: boolean) => {
     setEdicionGoles(prev => ({
       ...prev,
@@ -97,14 +94,32 @@ export default function IngresoResultadosManual() {
     const edicion = edicionGoles[partido.id];
     if (!edicion) return;
 
+    // 🚨 1. CÁLCULO DE PUNTOS NORMAL (Por goles en cancha)
+    let ptsL = 0;
+    let ptsV = 0;
+    
+    if (edicion.local > edicion.visita) { ptsL = 3; ptsV = 0; }
+    else if (edicion.local < edicion.visita) { ptsL = 0; ptsV = 3; }
+    else { ptsL = 1; ptsV = 1; }
+
+    // 🚨 2. APLICAR SANCIONES Y TRANSFERIR PUNTOS
+    if (edicion.quitaPuntosLocal && edicion.quitaPuntosVisita) {
+      ptsL = 0; ptsV = 0; // Ambos castigados
+    } else if (edicion.quitaPuntosLocal) {
+      ptsL = 0; ptsV = 3; // Castigo al Local, Visita gana los puntos
+    } else if (edicion.quitaPuntosVisita) {
+      ptsL = 3; ptsV = 0; // Castigo a Visita, Local gana los puntos
+    }
+
     setGuardandoId(partido.id);
     try {
-      // 🚨 SE GUARDAN LAS NUEVAS PROPIEDADES EN FIRESTORE
       await updateDoc(doc(db, "asociaciones/san_fabian/partidos", partido.id), {
         golesLocal: edicion.local,
         golesVisita: edicion.visita,
         quitaPuntosLocal: edicion.quitaPuntosLocal,
         quitaPuntosVisita: edicion.quitaPuntosVisita,
+        puntosLocal: ptsL,   // Guardamos los puntos ya asignados correctamente
+        puntosVisita: ptsV,  // Guardamos los puntos ya asignados correctamente
         estado: "Finalizado"
       });
       alert(`✅ Resultado guardado: ${partido.local} ${edicion.local} - ${edicion.visita} ${partido.visita}`);
@@ -134,12 +149,13 @@ export default function IngresoResultadosManual() {
       
       partidosBorrables.forEach(p => {
         const ref = doc(db, "asociaciones/san_fabian/partidos", p.id);
-        // 🚨 TAMBIÉN RESETEAMOS LA QUITA DE PUNTOS
         batch.update(ref, {
           golesLocal: 0,
           golesVisita: 0,
           quitaPuntosLocal: false,
           quitaPuntosVisita: false,
+          puntosLocal: 0,
+          puntosVisita: 0,
           estado: "Programado"
         });
         resetInputs[p.id] = { local: 0, visita: 0, quitaPuntosLocal: false, quitaPuntosVisita: false };
@@ -194,10 +210,29 @@ export default function IngresoResultadosManual() {
         if (partidoBd) {
           encontrados++;
           if (partidoBd.golesLocal !== Number(golesL) || partidoBd.golesVisita !== Number(golesV) || partidoBd.estado !== "Finalizado") {
+            
+            // Recalculamos los puntos en caso de subida masiva por Excel
+            let ptsL = 0, ptsV = 0;
+            const numGolesL = Number(golesL);
+            const numGolesV = Number(golesV);
+            
+            if (numGolesL > numGolesV) { ptsL = 3; ptsV = 0; }
+            else if (numGolesL < numGolesV) { ptsL = 0; ptsV = 3; }
+            else { ptsL = 1; ptsV = 1; }
+
+            const quitaL = partidoBd.quitaPuntosLocal || false;
+            const quitaV = partidoBd.quitaPuntosVisita || false;
+
+            if (quitaL && quitaV) { ptsL = 0; ptsV = 0; }
+            else if (quitaL) { ptsL = 0; ptsV = 3; }
+            else if (quitaV) { ptsL = 3; ptsV = 0; }
+
             const ref = doc(db, "asociaciones/san_fabian/partidos", partidoBd.id);
             batch.update(ref, {
-              golesLocal: Number(golesL),
-              golesVisita: Number(golesV),
+              golesLocal: numGolesL,
+              golesVisita: numGolesV,
+              puntosLocal: ptsL,
+              puntosVisita: ptsV,
               estado: "Finalizado"
             });
             actualizados++;
@@ -310,7 +345,6 @@ export default function IngresoResultadosManual() {
                 {partidosFiltrados.map(p => {
                   const edicion = edicionGoles[p.id] || { local: 0, visita: 0, quitaPuntosLocal: false, quitaPuntosVisita: false };
                   
-                  // 🚨 DETECTA CAMBIOS TANTO EN GOLES COMO EN SANCIONES DE PUNTOS
                   const cambioPendiente = 
                     edicion.local !== p.golesLocal || 
                     edicion.visita !== p.golesVisita || 
@@ -327,7 +361,6 @@ export default function IngresoResultadosManual() {
                       
                       <td className="p-4 text-right font-black uppercase text-sm md:text-base text-slate-800 truncate">
                         {p.local}
-                        {/* 🚨 CHECKBOX QUITA DE PUNTOS LOCAL */}
                         <div className="mt-1 flex justify-end">
                           <label className="flex items-center gap-1.5 text-[9px] text-red-500 hover:text-red-600 cursor-pointer bg-red-50/50 px-2 py-1 rounded border border-red-100">
                             <span>Sanción: Quitar Puntos</span>
@@ -363,7 +396,6 @@ export default function IngresoResultadosManual() {
                       
                       <td className="p-4 text-left font-black uppercase text-sm md:text-base text-slate-800 truncate">
                         {p.visita}
-                        {/* 🚨 CHECKBOX QUITA DE PUNTOS VISITA */}
                         <div className="mt-1 flex justify-start">
                           <label className="flex items-center gap-1.5 text-[9px] text-red-500 hover:text-red-600 cursor-pointer bg-red-50/50 px-2 py-1 rounded border border-red-100">
                             <input 
