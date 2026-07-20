@@ -8,6 +8,16 @@ import * as XLSX from "xlsx";
 interface Partido { 
   id: string; fechaNumero: number; local: string; visita: string; 
   serie: string; estado: string; golesLocal: number; golesVisita: number; 
+  // 🚨 NUEVOS CAMPOS AGREGADOS:
+  quitaPuntosLocal?: boolean; quitaPuntosVisita?: boolean;
+}
+
+// 🚨 NUEVA INTERFAZ PARA EL ESTADO DE EDICIÓN
+interface EdicionPartido {
+  local: number;
+  visita: number;
+  quitaPuntosLocal: boolean;
+  quitaPuntosVisita: boolean;
 }
 
 export default function IngresoResultadosManual() {
@@ -24,7 +34,8 @@ export default function IngresoResultadosManual() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [edicionGoles, setEdicionGoles] = useState<Record<string, { local: number, visita: number }>>({});
+  // 🚨 ESTADO ACTUALIZADO PARA SOPORTAR LA QUITA DE PUNTOS
+  const [edicionGoles, setEdicionGoles] = useState<Record<string, EdicionPartido>>({});
 
   useEffect(() => {
     if (authCargando) return;
@@ -33,13 +44,18 @@ export default function IngresoResultadosManual() {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Partido[];
       setPartidos(data);
       
-      const golesIniciales: Record<string, { local: number, visita: number }> = {};
+      const estadoInicial: Record<string, EdicionPartido> = {};
       data.forEach(p => {
         if (!edicionGoles[p.id]) {
-          golesIniciales[p.id] = { local: p.golesLocal || 0, visita: p.golesVisita || 0 };
+          estadoInicial[p.id] = { 
+            local: p.golesLocal || 0, 
+            visita: p.golesVisita || 0,
+            quitaPuntosLocal: p.quitaPuntosLocal || false,
+            quitaPuntosVisita: p.quitaPuntosVisita || false
+          };
         }
       });
-      setEdicionGoles(prev => ({ ...golesIniciales, ...prev }));
+      setEdicionGoles(prev => ({ ...estadoInicial, ...prev }));
       
       setCargandoDatos(false);
     });
@@ -66,18 +82,32 @@ export default function IngresoResultadosManual() {
     }));
   };
 
+  // 🚨 NUEVA FUNCIÓN: Manejar el cambio de los checkboxes de quita de puntos
+  const manejarQuitaPuntos = (id: string, equipo: 'local' | 'visita', valor: boolean) => {
+    setEdicionGoles(prev => ({
+      ...prev,
+      [id]: { 
+        ...prev[id], 
+        [equipo === 'local' ? 'quitaPuntosLocal' : 'quitaPuntosVisita']: valor 
+      }
+    }));
+  };
+
   const guardarResultadoForzado = async (partido: Partido) => {
-    const nuevosGoles = edicionGoles[partido.id];
-    if (!nuevosGoles) return;
+    const edicion = edicionGoles[partido.id];
+    if (!edicion) return;
 
     setGuardandoId(partido.id);
     try {
+      // 🚨 SE GUARDAN LAS NUEVAS PROPIEDADES EN FIRESTORE
       await updateDoc(doc(db, "asociaciones/san_fabian/partidos", partido.id), {
-        golesLocal: nuevosGoles.local,
-        golesVisita: nuevosGoles.visita,
+        golesLocal: edicion.local,
+        golesVisita: edicion.visita,
+        quitaPuntosLocal: edicion.quitaPuntosLocal,
+        quitaPuntosVisita: edicion.quitaPuntosVisita,
         estado: "Finalizado"
       });
-      alert(`✅ Resultado guardado: ${partido.local} ${nuevosGoles.local} - ${nuevosGoles.visita} ${partido.visita}`);
+      alert(`✅ Resultado guardado: ${partido.local} ${edicion.local} - ${edicion.visita} ${partido.visita}`);
     } catch (error) {
       alert("Error al guardar el resultado.");
     } finally {
@@ -85,7 +115,6 @@ export default function IngresoResultadosManual() {
     }
   };
 
-  // 🚨 NUEVA FUNCIÓN: Limpiar resultados masivamente
   const limpiarResultadosVisibles = async () => {
     const partidosBorrables = partidosFiltrados.filter(p => p.estado === "Finalizado" || p.golesLocal > 0 || p.golesVisita > 0);
 
@@ -101,21 +130,23 @@ export default function IngresoResultadosManual() {
     try {
       const batch = writeBatch(db);
       
-      // Actualizamos estado de BD y también preparamos actualización del estado local de inputs
       const resetInputs = { ...edicionGoles };
       
       partidosBorrables.forEach(p => {
         const ref = doc(db, "asociaciones/san_fabian/partidos", p.id);
+        // 🚨 TAMBIÉN RESETEAMOS LA QUITA DE PUNTOS
         batch.update(ref, {
           golesLocal: 0,
           golesVisita: 0,
+          quitaPuntosLocal: false,
+          quitaPuntosVisita: false,
           estado: "Programado"
         });
-        resetInputs[p.id] = { local: 0, visita: 0 };
+        resetInputs[p.id] = { local: 0, visita: 0, quitaPuntosLocal: false, quitaPuntosVisita: false };
       });
 
       await batch.commit();
-      setEdicionGoles(resetInputs); // Reseteamos visualmente los inputs de inmediato
+      setEdicionGoles(resetInputs); 
       alert(`✅ Se han limpiado y reseteado ${partidosBorrables.length} partidos correctamente.`);
     } catch (error) {
       console.error(error);
@@ -211,8 +242,6 @@ export default function IngresoResultadosManual() {
       <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200">
         
         <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-6">
-          
-          {/* Zona de Filtros */}
           <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
             <div className="flex items-center justify-between md:justify-start gap-3 bg-slate-50 p-2 rounded-xl border border-slate-200 w-full md:w-auto">
               <span className="text-[10px] font-black text-slate-400 uppercase ml-2 shrink-0">Fecha:</span>
@@ -231,9 +260,7 @@ export default function IngresoResultadosManual() {
             </div>
           </div>
 
-          {/* 🚨 ZONA DE BOTONES DE ACCIÓN (Excel y Limpiar) */}
           <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
-            {/* Botón Limpiar */}
             <button 
               onClick={limpiarResultadosVisibles}
               disabled={limpiandoDatos}
@@ -244,7 +271,6 @@ export default function IngresoResultadosManual() {
               {limpiandoDatos ? '🧹 Borrando...' : '🧹 Limpiar Vista'}
             </button>
 
-            {/* Botón Excel */}
             <input 
               type="file" 
               accept=".xlsx, .xls" 
@@ -282,8 +308,15 @@ export default function IngresoResultadosManual() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {partidosFiltrados.map(p => {
-                  const golesEdit = edicionGoles[p.id] || { local: 0, visita: 0 };
-                  const cambioPendiente = golesEdit.local !== p.golesLocal || golesEdit.visita !== p.golesVisita || p.estado !== "Finalizado";
+                  const edicion = edicionGoles[p.id] || { local: 0, visita: 0, quitaPuntosLocal: false, quitaPuntosVisita: false };
+                  
+                  // 🚨 DETECTA CAMBIOS TANTO EN GOLES COMO EN SANCIONES DE PUNTOS
+                  const cambioPendiente = 
+                    edicion.local !== p.golesLocal || 
+                    edicion.visita !== p.golesVisita || 
+                    edicion.quitaPuntosLocal !== (p.quitaPuntosLocal || false) ||
+                    edicion.quitaPuntosVisita !== (p.quitaPuntosVisita || false) ||
+                    p.estado !== "Finalizado";
 
                   return (
                     <tr key={p.id} className={`transition-colors ${p.estado === "Finalizado" ? 'bg-slate-50/50' : 'hover:bg-slate-50'}`}>
@@ -294,6 +327,18 @@ export default function IngresoResultadosManual() {
                       
                       <td className="p-4 text-right font-black uppercase text-sm md:text-base text-slate-800 truncate">
                         {p.local}
+                        {/* 🚨 CHECKBOX QUITA DE PUNTOS LOCAL */}
+                        <div className="mt-1 flex justify-end">
+                          <label className="flex items-center gap-1.5 text-[9px] text-red-500 hover:text-red-600 cursor-pointer bg-red-50/50 px-2 py-1 rounded border border-red-100">
+                            <span>Sanción: Quitar Puntos</span>
+                            <input 
+                              type="checkbox" 
+                              checked={edicion.quitaPuntosLocal}
+                              onChange={(e) => manejarQuitaPuntos(p.id, 'local', e.target.checked)}
+                              className="accent-red-500 w-3 h-3"
+                            />
+                          </label>
+                        </div>
                       </td>
                       
                       <td className="p-4 bg-emerald-50/30">
@@ -301,7 +346,7 @@ export default function IngresoResultadosManual() {
                           <input 
                             type="number" 
                             min="0"
-                            value={golesEdit.local} 
+                            value={edicion.local} 
                             onChange={(e) => manejarCambioGol(p.id, 'local', e.target.value)}
                             className="w-14 md:w-16 p-2 text-center text-xl font-black rounded-lg border-2 border-slate-200 focus:border-emerald-500 outline-none bg-white text-[#1e3a8a]"
                           />
@@ -309,7 +354,7 @@ export default function IngresoResultadosManual() {
                           <input 
                             type="number" 
                             min="0"
-                            value={golesEdit.visita} 
+                            value={edicion.visita} 
                             onChange={(e) => manejarCambioGol(p.id, 'visita', e.target.value)}
                             className="w-14 md:w-16 p-2 text-center text-xl font-black rounded-lg border-2 border-slate-200 focus:border-emerald-500 outline-none bg-white text-[#1e3a8a]"
                           />
@@ -318,6 +363,18 @@ export default function IngresoResultadosManual() {
                       
                       <td className="p-4 text-left font-black uppercase text-sm md:text-base text-slate-800 truncate">
                         {p.visita}
+                        {/* 🚨 CHECKBOX QUITA DE PUNTOS VISITA */}
+                        <div className="mt-1 flex justify-start">
+                          <label className="flex items-center gap-1.5 text-[9px] text-red-500 hover:text-red-600 cursor-pointer bg-red-50/50 px-2 py-1 rounded border border-red-100">
+                            <input 
+                              type="checkbox" 
+                              checked={edicion.quitaPuntosVisita}
+                              onChange={(e) => manejarQuitaPuntos(p.id, 'visita', e.target.checked)}
+                              className="accent-red-500 w-3 h-3"
+                            />
+                            <span>Sanción: Quitar Puntos</span>
+                          </label>
+                        </div>
                       </td>
 
                       <td className="p-4 text-center">
