@@ -5,7 +5,12 @@ import { collection, onSnapshot, query, doc, getDoc } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { toPng } from 'html-to-image';
 
-interface Partido { id: string; estado: string; serie: string; local: string; visita: string; golesLocal: number; golesVisita: number; }
+// 🚨 ACTUALIZADO: Se agregaron los campos de puntos a la interfaz
+interface Partido { 
+  id: string; estado: string; serie: string; local: string; visita: string; 
+  golesLocal: number; golesVisita: number;
+  puntosLocal?: number; puntosVisita?: number;
+}
 interface Estadisticas { club: string; PJ: number; PG: number; PE: number; PP: number; GF: number; GC: number; DG: number; PTS: number; }
 interface AsociacionInfo { nombre?: string; logoUrl?: string; auspiciadorNombre?: string; auspiciadorLogo?: string; }
 interface Club { id: string; nombre: string; logoUrl?: string; instagram?: string; facebook?: string; }
@@ -57,24 +62,47 @@ export default function HomePublico() {
       if (!general[club]) general[club] = { club, PJ: 0, PG: 0, PE: 0, PP: 0, GF: 0, GC: 0, DG: 0, PTS: 0 };
     };
 
-    const sumarStats = (club: string, serie: string, golesF: number, golesC: number) => {
-      let pts = 0; let pg = 0; let pe = 0; let pp = 0;
-      if (golesF > golesC) { pts = 3; pg = 1; }
-      else if (golesF === golesC) { pts = 1; pe = 1; }
-      else { pp = 1; }
-
-      const s = series[serie][club];
-      s.PJ++; s.PG += pg; s.PE += pe; s.PP += pp; s.GF += golesF; s.GC += golesC; s.DG = s.GF - s.GC; s.PTS += pts;
-
-      const g = general[club];
-      g.PJ++; g.PG += pg; g.PE += pe; g.PP += pp; g.GF += golesF; g.GC += golesC; g.DG = g.GF - g.GC; g.PTS += pts;
-    };
-
+    // 🚨 ACTUALIZADO: Nueva lógica de asignación de estadísticas
     partidos.forEach(p => {
       inicializarStats(p.local, p.serie);
       inicializarStats(p.visita, p.serie);
-      sumarStats(p.local, p.serie, p.golesLocal || 0, p.golesVisita || 0);
-      sumarStats(p.visita, p.serie, p.golesVisita || 0, p.golesLocal || 0);
+
+      const golesL = p.golesLocal || 0;
+      const golesV = p.golesVisita || 0;
+
+      let ptsL = 0, pgL = 0, peL = 0, ppL = 0;
+      let ptsV = 0, pgV = 0, peV = 0, ppV = 0;
+
+      // Si los puntos ya vienen calculados desde la base de datos (con las reglas de sanciones)
+      if (p.puntosLocal !== undefined && p.puntosVisita !== undefined) {
+        ptsL = p.puntosLocal;
+        ptsV = p.puntosVisita;
+
+        // Asignar Victorias/Empates/Derrotas basados en los puntos reales (no en los goles)
+        if (ptsL === 3) { pgL = 1; ppV = 1; }
+        else if (ptsV === 3) { pgV = 1; ppL = 1; }
+        else if (ptsL === 1 && ptsV === 1) { peL = 1; peV = 1; }
+        else if (ptsL === 0 && ptsV === 0) { ppL = 1; ppV = 1; } // Ambos sancionados
+      } else {
+        // Fallback: Partidos antiguos que se ingresaron antes de la actualización
+        if (golesL > golesV) { ptsL = 3; pgL = 1; ppV = 1; }
+        else if (golesL < golesV) { ptsV = 3; pgV = 1; ppL = 1; }
+        else { ptsL = 1; ptsV = 1; peL = 1; peV = 1; }
+      }
+
+      // Sumar al equipo Local
+      const sL = series[p.serie][p.local];
+      sL.PJ++; sL.PG += pgL; sL.PE += peL; sL.PP += ppL; sL.GF += golesL; sL.GC += golesV; sL.DG = sL.GF - sL.GC; sL.PTS += ptsL;
+
+      const gL = general[p.local];
+      gL.PJ++; gL.PG += pgL; gL.PE += peL; gL.PP += ppL; gL.GF += golesL; gL.GC += golesV; gL.DG = gL.GF - gL.GC; gL.PTS += ptsL;
+
+      // Sumar al equipo Visita
+      const sV = series[p.serie][p.visita];
+      sV.PJ++; sV.PG += pgV; sV.PE += peV; sV.PP += ppV; sV.GF += golesV; sV.GC += golesL; sV.DG = sV.GF - sV.GC; sV.PTS += ptsV;
+
+      const gV = general[p.visita];
+      gV.PJ++; gV.PG += pgV; gV.PE += peV; gV.PP += ppV; gV.GF += golesV; gV.GC += golesL; gV.DG = gV.GF - gV.GC; gV.PTS += ptsV;
     });
 
     const ordenarTabla = (tabla: Record<string, Estadisticas>) => Object.values(tabla).sort((a, b) => b.PTS - a.PTS || b.DG - a.DG || b.GF - a.GF);
@@ -87,7 +115,6 @@ export default function HomePublico() {
 
   const esGestion = useMemo(() => rolUsuario === 'admin' || rolUsuario === 'delegado', [rolUsuario]);
 
-  // FUNCIÓN ACTUALIZADA: Generación de 16:9 con Canvas
   const descargarTablaComoImagen = async (serieNombre: string) => {
     const nodo = tablaRefs.current[serieNombre];
     
@@ -97,14 +124,12 @@ export default function HomePublico() {
     }
 
     try {
-      // 1. Capturar la tabla tal cual está en la web
       const dataUrl = await toPng(nodo, {
         backgroundColor: '#ffffff',
         pixelRatio: 2, 
         style: { borderRadius: '0px', margin: '0' },
       });
       
-      // 2. Cargarla en memoria para manipularla
       const img = new window.Image();
       img.src = dataUrl;
       
@@ -112,36 +137,29 @@ export default function HomePublico() {
         const imgW = img.width;
         const imgH = img.height;
 
-        // 3. Matemáticas para forzar 16:9
         const targetRatio = 16 / 9;
         let canvasW = imgW;
         let canvasH = imgH;
 
         if (imgW / imgH < targetRatio) {
-          // Si la tabla es alta (muchos equipos), calculamos márgenes a los lados
           canvasW = imgH * targetRatio;
         } else {
-          // Si la tabla es ancha (pocos equipos), calculamos márgenes arriba/abajo
           canvasH = imgW / targetRatio;
         }
 
-        // 4. Crear el lienzo invisible
         const canvas = document.createElement('canvas');
         canvas.width = canvasW;
         canvas.height = canvasH;
         const ctx = canvas.getContext('2d');
 
         if (ctx) {
-          // Rellenar el fondo de blanco para que no se note la unión
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(0, 0, canvasW, canvasH);
 
-          // Pegar la tabla perfectamente en el centro
           const x = (canvasW - imgW) / 2;
           const y = (canvasH - imgH) / 2;
           ctx.drawImage(img, x, y, imgW, imgH);
 
-          // 5. Descargar la imagen final 16:9
           const finalDataUrl = canvas.toDataURL('image/png');
           const link = document.createElement('a');
           const sanitizedSerie = serieNombre.toLowerCase().replace(/ /g, '-');
