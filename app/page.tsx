@@ -5,7 +5,6 @@ import { collection, onSnapshot, query, doc, getDoc } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { toPng } from 'html-to-image';
 
-// 🚨 ACTUALIZADO: Se agregaron los campos de puntos a la interfaz
 interface Partido { 
   id: string; estado: string; serie: string; local: string; visita: string; 
   golesLocal: number; golesVisita: number;
@@ -62,7 +61,6 @@ export default function HomePublico() {
       if (!general[club]) general[club] = { club, PJ: 0, PG: 0, PE: 0, PP: 0, GF: 0, GC: 0, DG: 0, PTS: 0 };
     };
 
-    // 🚨 ACTUALIZADO: Nueva lógica de asignación de estadísticas
     partidos.forEach(p => {
       inicializarStats(p.local, p.serie);
       inicializarStats(p.visita, p.serie);
@@ -70,39 +68,45 @@ export default function HomePublico() {
       const golesL = p.golesLocal || 0;
       const golesV = p.golesVisita || 0;
 
-      let ptsL = 0, pgL = 0, peL = 0, ppL = 0;
-      let ptsV = 0, pgV = 0, peV = 0, ppV = 0;
+      // 🚨 1. LÓGICA PARA LA TABLA POR SERIE (AQUÍ SÍ SE APLICAN LOS CASTIGOS)
+      let ptsL_S = 0, pgL_S = 0, peL_S = 0, ppL_S = 0;
+      let ptsV_S = 0, pgV_S = 0, peV_S = 0, ppV_S = 0;
 
-      // Si los puntos ya vienen calculados desde la base de datos (con las reglas de sanciones)
       if (p.puntosLocal !== undefined && p.puntosVisita !== undefined) {
-        ptsL = p.puntosLocal;
-        ptsV = p.puntosVisita;
+        ptsL_S = p.puntosLocal;
+        ptsV_S = p.puntosVisita;
 
-        // Asignar Victorias/Empates/Derrotas basados en los puntos reales (no en los goles)
-        if (ptsL === 3) { pgL = 1; ppV = 1; }
-        else if (ptsV === 3) { pgV = 1; ppL = 1; }
-        else if (ptsL === 1 && ptsV === 1) { peL = 1; peV = 1; }
-        else if (ptsL === 0 && ptsV === 0) { ppL = 1; ppV = 1; } // Ambos sancionados
+        if (ptsL_S === 3) { pgL_S = 1; ppV_S = 1; }
+        else if (ptsV_S === 3) { pgV_S = 1; ppL_S = 1; }
+        else if (ptsL_S === 1 && ptsV_S === 1) { peL_S = 1; peV_S = 1; }
+        else if (ptsL_S === 0 && ptsV_S === 0) { ppL_S = 1; ppV_S = 1; }
       } else {
-        // Fallback: Partidos antiguos que se ingresaron antes de la actualización
-        if (golesL > golesV) { ptsL = 3; pgL = 1; ppV = 1; }
-        else if (golesL < golesV) { ptsV = 3; pgV = 1; ppL = 1; }
-        else { ptsL = 1; ptsV = 1; peL = 1; peV = 1; }
+        if (golesL > golesV) { ptsL_S = 3; pgL_S = 1; ppV_S = 1; }
+        else if (golesL < golesV) { ptsV_S = 3; pgV_S = 1; ppL_S = 1; }
+        else { ptsL_S = 1; ptsV_S = 1; peL_S = 1; peV_S = 1; }
       }
 
-      // Sumar al equipo Local
+      // 🚨 2. LÓGICA PARA LA TABLA GENERAL DE CLUBES (AQUÍ SE IGNORAN LOS CASTIGOS, SOLO VALE LA CANCHA)
+      let ptsL_G = 0, pgL_G = 0, peL_G = 0, ppL_G = 0;
+      let ptsV_G = 0, pgV_G = 0, peV_G = 0, ppV_G = 0;
+
+      if (golesL > golesV) { ptsL_G = 3; pgL_G = 1; ppV_G = 1; }
+      else if (golesL < golesV) { ptsV_G = 3; pgV_G = 1; ppL_G = 1; }
+      else { ptsL_G = 1; ptsV_G = 1; peL_G = 1; peV_G = 1; }
+
+      // ASIGNAR ESTADÍSTICAS A LA SERIE (Con el castigo incluido)
       const sL = series[p.serie][p.local];
-      sL.PJ++; sL.PG += pgL; sL.PE += peL; sL.PP += ppL; sL.GF += golesL; sL.GC += golesV; sL.DG = sL.GF - sL.GC; sL.PTS += ptsL;
+      sL.PJ++; sL.PG += pgL_S; sL.PE += peL_S; sL.PP += ppL_S; sL.GF += golesL; sL.GC += golesV; sL.DG = sL.GF - sL.GC; sL.PTS += ptsL_S;
 
-      const gL = general[p.local];
-      gL.PJ++; gL.PG += pgL; gL.PE += peL; gL.PP += ppL; gL.GF += golesL; gL.GC += golesV; gL.DG = gL.GF - gL.GC; gL.PTS += ptsL;
-
-      // Sumar al equipo Visita
       const sV = series[p.serie][p.visita];
-      sV.PJ++; sV.PG += pgV; sV.PE += peV; sV.PP += ppV; sV.GF += golesV; sV.GC += golesL; sV.DG = sV.GF - sV.GC; sV.PTS += ptsV;
+      sV.PJ++; sV.PG += pgV_S; sV.PE += peV_S; sV.PP += ppV_S; sV.GF += golesV; sV.GC += golesL; sV.DG = sV.GF - sV.GC; sV.PTS += ptsV_S;
+
+      // ASIGNAR ESTADÍSTICAS A LA GENERAL DEL CLUB (Sin castigos, puntos limpios)
+      const gL = general[p.local];
+      gL.PJ++; gL.PG += pgL_G; gL.PE += peL_G; gL.PP += ppL_G; gL.GF += golesL; gL.GC += golesV; gL.DG = gL.GF - gL.GC; gL.PTS += ptsL_G;
 
       const gV = general[p.visita];
-      gV.PJ++; gV.PG += pgV; gV.PE += peV; gV.PP += ppV; gV.GF += golesV; gV.GC += golesL; gV.DG = gV.GF - gV.GC; gV.PTS += ptsV;
+      gV.PJ++; gV.PG += pgV_G; gV.PE += peV_G; gV.PP += ppV_G; gV.GF += golesV; gV.GC += golesL; gV.DG = gV.GF - gV.GC; gV.PTS += ptsV_G;
     });
 
     const ordenarTabla = (tabla: Record<string, Estadisticas>) => Object.values(tabla).sort((a, b) => b.PTS - a.PTS || b.DG - a.DG || b.GF - a.GF);
@@ -200,7 +204,7 @@ export default function HomePublico() {
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-6 border-b pb-4 border-slate-100 gap-4">
             <div>
               <h2 className="text-xl md:text-2xl font-black text-emerald-700 tracking-tight flex items-center gap-2"><span className="text-3xl">🏆</span> TABLA GENERAL DE CLUBES</h2>
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Acumulado de todas las series</p>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Acumulado de todas las series (Sin castigos por secretaría)</p>
             </div>
             <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-3 py-1 rounded uppercase shadow-sm whitespace-nowrap">Uso Interno Directiva</span>
           </div>
