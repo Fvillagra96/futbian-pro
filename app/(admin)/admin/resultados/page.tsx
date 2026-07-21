@@ -9,7 +9,7 @@ interface Partido {
   id: string; fechaNumero: number; local: string; visita: string; 
   serie: string; estado: string; golesLocal: number; golesVisita: number; 
   quitaPuntosLocal?: boolean; quitaPuntosVisita?: boolean;
-  puntosLocal?: number; puntosVisita?: number; // Guardaremos los puntos finales aquí
+  puntosLocal?: number; puntosVisita?: number;
 }
 
 interface EdicionPartido {
@@ -28,6 +28,8 @@ export default function IngresoResultadosManual() {
   
   const [filtroFecha, setFiltroFecha] = useState<string>("Todas");
   const [filtroSerie, setFiltroSerie] = useState<string>("Todas");
+  // 1. Nuevo estado para el filtro de Club
+  const [filtroClub, setFiltroClub] = useState<string>("Todos");
   
   const [guardandoId, setGuardandoId] = useState<string | null>(null);
 
@@ -64,13 +66,25 @@ export default function IngresoResultadosManual() {
   const numerosDeFechas = useMemo(() => Array.from(new Set(partidos.map(p => p.fechaNumero))).sort((a, b) => b - a), [partidos]);
   const seriesDisponibles = useMemo(() => Array.from(new Set(partidos.map(p => p.serie))).sort(), [partidos]);
   
+  // 2. Extraer lista única de clubes disponibles (locales y visitas)
+  const clubesDisponibles = useMemo(() => {
+    const clubes = new Set<string>();
+    partidos.forEach(p => {
+      if (p.local) clubes.add(p.local);
+      if (p.visita) clubes.add(p.visita);
+    });
+    return Array.from(clubes).sort();
+  }, [partidos]);
+  
+  // 3. Actualizar la lógica de filtrado
   const partidosFiltrados = useMemo(() => {
     return partidos.filter(p => {
       const coincideFecha = filtroFecha === "Todas" || p.fechaNumero === Number(filtroFecha);
       const coincideSerie = filtroSerie === "Todas" || p.serie === filtroSerie;
-      return coincideFecha && coincideSerie;
+      const coincideClub = filtroClub === "Todos" || p.local === filtroClub || p.visita === filtroClub;
+      return coincideFecha && coincideSerie && coincideClub;
     });
-  }, [partidos, filtroFecha, filtroSerie]);
+  }, [partidos, filtroFecha, filtroSerie, filtroClub]);
 
   const manejarCambioGol = (id: string, equipo: 'local' | 'visita', valor: string) => {
     const numero = parseInt(valor) || 0;
@@ -94,7 +108,6 @@ export default function IngresoResultadosManual() {
     const edicion = edicionGoles[partido.id];
     if (!edicion) return;
 
-    // 🚨 1. CÁLCULO DE PUNTOS NORMAL (Por goles en cancha)
     let ptsL = 0;
     let ptsV = 0;
     
@@ -102,13 +115,12 @@ export default function IngresoResultadosManual() {
     else if (edicion.local < edicion.visita) { ptsL = 0; ptsV = 3; }
     else { ptsL = 1; ptsV = 1; }
 
-    // 🚨 2. APLICAR SANCIONES Y TRANSFERIR PUNTOS
     if (edicion.quitaPuntosLocal && edicion.quitaPuntosVisita) {
-      ptsL = 0; ptsV = 0; // Ambos castigados
+      ptsL = 0; ptsV = 0; 
     } else if (edicion.quitaPuntosLocal) {
-      ptsL = 0; ptsV = 3; // Castigo al Local, Visita gana los puntos
+      ptsL = 0; ptsV = 3; 
     } else if (edicion.quitaPuntosVisita) {
-      ptsL = 3; ptsV = 0; // Castigo a Visita, Local gana los puntos
+      ptsL = 3; ptsV = 0; 
     }
 
     setGuardandoId(partido.id);
@@ -118,8 +130,8 @@ export default function IngresoResultadosManual() {
         golesVisita: edicion.visita,
         quitaPuntosLocal: edicion.quitaPuntosLocal,
         quitaPuntosVisita: edicion.quitaPuntosVisita,
-        puntosLocal: ptsL,   // Guardamos los puntos ya asignados correctamente
-        puntosVisita: ptsV,  // Guardamos los puntos ya asignados correctamente
+        puntosLocal: ptsL,
+        puntosVisita: ptsV,
         estado: "Finalizado"
       });
       alert(`✅ Resultado guardado: ${partido.local} ${edicion.local} - ${edicion.visita} ${partido.visita}`);
@@ -144,7 +156,6 @@ export default function IngresoResultadosManual() {
     setLimpiandoDatos(true);
     try {
       const batch = writeBatch(db);
-      
       const resetInputs = { ...edicionGoles };
       
       partidosBorrables.forEach(p => {
@@ -211,7 +222,6 @@ export default function IngresoResultadosManual() {
           encontrados++;
           if (partidoBd.golesLocal !== Number(golesL) || partidoBd.golesVisita !== Number(golesV) || partidoBd.estado !== "Finalizado") {
             
-            // Recalculamos los puntos en caso de subida masiva por Excel
             let ptsL = 0, ptsV = 0;
             const numGolesL = Number(golesL);
             const numGolesV = Number(golesV);
@@ -277,20 +287,29 @@ export default function IngresoResultadosManual() {
       <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200">
         
         <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-6">
-          <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
-            <div className="flex items-center justify-between md:justify-start gap-3 bg-slate-50 p-2 rounded-xl border border-slate-200 w-full md:w-auto">
+          <div className="flex flex-col lg:flex-row gap-3 w-full md:w-auto flex-wrap">
+            <div className="flex items-center justify-between md:justify-start gap-3 bg-slate-50 p-2 rounded-xl border border-slate-200 w-full lg:w-auto">
               <span className="text-[10px] font-black text-slate-400 uppercase ml-2 shrink-0">Fecha:</span>
-              <select value={filtroFecha} onChange={(e) => setFiltroFecha(e.target.value)} className="bg-white border border-slate-300 rounded-lg px-3 py-2 font-bold text-sm outline-none focus:ring-2 focus:ring-emerald-500 w-full md:w-40 text-slate-700">
+              <select value={filtroFecha} onChange={(e) => setFiltroFecha(e.target.value)} className="bg-white border border-slate-300 rounded-lg px-3 py-2 font-bold text-sm outline-none focus:ring-2 focus:ring-emerald-500 w-full lg:w-40 text-slate-700">
                 <option value="Todas">Todas</option>
                 {numerosDeFechas.map(num => <option key={num} value={num}>Fecha {num}</option>)}
               </select>
             </div>
 
-            <div className="flex items-center justify-between md:justify-start gap-3 bg-slate-50 p-2 rounded-xl border border-slate-200 w-full md:w-auto">
+            <div className="flex items-center justify-between md:justify-start gap-3 bg-slate-50 p-2 rounded-xl border border-slate-200 w-full lg:w-auto">
               <span className="text-[10px] font-black text-slate-400 uppercase ml-2 shrink-0">Serie:</span>
-              <select value={filtroSerie} onChange={(e) => setFiltroSerie(e.target.value)} className="bg-white border border-slate-300 rounded-lg px-3 py-2 font-bold text-sm outline-none focus:ring-2 focus:ring-emerald-500 w-full md:w-40 text-slate-700">
+              <select value={filtroSerie} onChange={(e) => setFiltroSerie(e.target.value)} className="bg-white border border-slate-300 rounded-lg px-3 py-2 font-bold text-sm outline-none focus:ring-2 focus:ring-emerald-500 w-full lg:w-40 text-slate-700">
                 <option value="Todas">Todas</option>
                 {seriesDisponibles.map(serie => <option key={serie} value={serie}>{serie}</option>)}
+              </select>
+            </div>
+
+            {/* 4. Nuevo Select en la UI para el filtro por Club */}
+            <div className="flex items-center justify-between md:justify-start gap-3 bg-slate-50 p-2 rounded-xl border border-slate-200 w-full lg:w-auto">
+              <span className="text-[10px] font-black text-slate-400 uppercase ml-2 shrink-0">Club:</span>
+              <select value={filtroClub} onChange={(e) => setFiltroClub(e.target.value)} className="bg-white border border-slate-300 rounded-lg px-3 py-2 font-bold text-sm outline-none focus:ring-2 focus:ring-emerald-500 w-full lg:w-40 text-slate-700">
+                <option value="Todos">Todos</option>
+                {clubesDisponibles.map(club => <option key={club} value={club}>{club}</option>)}
               </select>
             </div>
           </div>
